@@ -172,6 +172,25 @@ For Flows there's a **Car data stream changed** trigger (with the new state as a
 - **Car data stream is live**: changes reach Homey within seconds. A parked car can stay silent for hours while the stream is fine, so use this to decide whether a battery level read earlier is still current.
 - **Car data was updated in the last … minutes**: the car measured new data within that time.
 
+### Flow cards
+
+Triggers fire only when a value really changes between two known states: never on the first data after the app starts, and never because a value is missing.
+
+| Trigger                                                                        | Fires when                                                                                        | Needs these items ticked in the BMW CarData stream  |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| The car was locked / unlocked                                                  | the car's lock state changes (BMW sends it only now and then, so it can lag)                      | `vehicle.cabin.door.status`                         |
+| The charging flap was locked / unlocked                                        | the charging flap lock changes                                                                    | `vehicle.body.flap.isLocked`                        |
+| A charging cable was plugged in / unplugged                                    | the cable is connected or disconnected                                                            | `vehicle.body.chargingPort.status`                  |
+| Charging status changed                                                        | charging starts, pauses, ends, errors and so on                                                   | `vehicle.drivetrain.electricEngine.charging.status` |
+| Battery level changed and is above X%                                          | every change of the battery level while it is above X (with 80: at 81, again at 82, …; not at 80) | `vehicle.drivetrain.batteryManagement.header`       |
+| Climate started / stopped / status changed                                     | climate preconditioning starts, stops or changes mode                                             | `vehicle.vehicle.preConditioning.activity`          |
+| Car data stream changed                                                        | the stream goes Live, Reconnecting, Off or Unavailable                                            | —                                                   |
+| Location changed, geofence entered / exited, drive session started / completed | the car reports a new location or the end of a trip                                               | the location and `vehicle.trip.segment.end.*` items |
+
+Conditions: the car is locked, a charging cable is plugged in, charging status is …, battery charge is less than …, inside a geofence, car data stream is live, car data was updated in the last … minutes. When the data a condition needs isn't known yet, the flow stops with an error that says so, instead of guessing.
+
+The charging state uses the cable sensor as well as the charging status, so a car that's plugged in and waiting for a scheduled start shows "plugged in", and a paused charge shows "plugged in, paused".
+
 ### REST API Polling (Fallback)
 
 **How it works:**
