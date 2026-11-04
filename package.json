@@ -1,6 +1,6 @@
 {
-  "name": "com.rexwel.bmwconnected",
-  "version": "1.0.0",
+  "name": "com.seyedjafari.bmwconnected",
+  "version": "1.1.0",
   "main": "app.ts",
   "scripts": {
     "prebuild": "copyfiles -f -V -E \"./shared/pair_repair/*.*\" ./drivers/bmw/pair && copyfiles -f -V -E \"./shared/pair_repair/*.*\" ./drivers/bmw/repair && copyfiles -f -V -E \"./shared/pair_repair/*.*\" ./drivers/mini/pair && copyfiles -f -V -E \"./shared/pair_repair/*.*\" ./drivers/mini/repair",
@@ -40,6 +40,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "jest": "^29.7.0",
+    "jest-util": "^29.7.0",
     "markdownlint-cli2": "^0.18.1",
     "prettier": "^3.6.2",
     "ts-jest": "^29.2.5",
@@ -48,15 +49,27 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lsiddiquee/com.rexwel.bmwconnected.git"
+    "url": "git+https://github.com/helloseyedjafari/bmw-cardata-homey.git"
   },
   "author": {
-    "name": "Likhan Siddiquee",
-    "email": "likhan.siddiquee@gmail.com"
+    "name": "Seyed Jafari",
+    "email": "hello@seyedjafari.com"
   },
   "license": "GPLV3",
   "bugs": {
-    "url": "https://github.com/lsiddiquee/com.rexwel.bmwconnected/issues"
+    "url": "https://github.com/helloseyedjafari/bmw-cardata-homey/issues"
   },
-  "homepage": "https://github.com/lsiddiquee/com.rexwel.bmwconnected#readme"
+  "homepage": "https://github.com/helloseyedjafari/bmw-cardata-homey#readme",
+  "contributors": [
+    {
+      "name": "Likhan Siddiquee",
+      "email": "likhan.siddiquee@gmail.com"
+    },
+    {
+      "name": "Sander Schutten"
+    },
+    {
+      "name": "Glenn Heylen"
+    }
+  ]
 }

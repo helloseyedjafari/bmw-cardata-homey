@@ -1,4 +1,8 @@
-# BMW Connected
+# CarData for BMW & MINI
+
+A Homey Pro app for following your BMW or MINI's battery, charging, location, doors and windows, using BMW's official CarData service.
+
+This app is based on [BMW / Mini Connected](https://github.com/lsiddiquee/com.rexwel.bmwconnected) by Likhan Siddiquee and its contributors, and is released under the same GPL-3.0 licence. It runs as a separate app with its own app ID (`com.seyedjafari.bmwconnected`), so it can be installed alongside the original. Don't stream with both at once: BMW allows one CarData streaming connection per account.
 
 Monitor your BMW or Mini vehicle data in Homey using the official BMW CarData API.
 
@@ -208,7 +212,6 @@ The app automatically:
 
 ## Useful links
 
-- [Latest release info](https://community.athom.com/t/app-bmw-connected/49199/2)
-- [Changelog](https://community.athom.com/t/app-bmw-connected/49199/3)
-- [FAQ](https://community.athom.com/t/app-bmw-connected/49199/4)
-- [TODO List](https://community.athom.com/t/app-bmw-connected/49199/5)
+- [Source code](https://github.com/helloseyedjafari/bmw-cardata-homey)
+- [Report a problem](https://github.com/helloseyedjafari/bmw-cardata-homey/issues)
+- [Original app: BMW / Mini Connected](https://github.com/lsiddiquee/com.rexwel.bmwconnected)

@@ -1,19 +1,35 @@
 {
-  "id": "com.rexwel.bmwconnected",
-  "version": "1.0.14",
+  "id": "com.seyedjafari.bmwconnected",
+  "version": "1.1.0",
   "compatibility": ">=5.0.0",
   "sdk": 3,
+  "platforms": [
+    "local"
+  ],
   "name": {
-    "en": "BMW / Mini Connected"
+    "en": "CarData for BMW & MINI"
   },
   "description": {
-    "en": "BMW / Mini Connected connects you to your BMW and/or Mini and the rest of the world.",
-    "nl": "BMW / Mini Connected verbindt je met je BMW en/of Mini en de rest van de wereld."
+    "en": "Follow your BMW or MINI's battery, charging, location, doors and windows live in Homey, using BMW's official CarData service.",
+    "nl": "Volg de batterij, het laden, de locatie, deuren en ramen van je BMW of MINI live in Homey, via de officiële CarData-dienst van BMW."
   },
   "brandColor": "#009ADA",
   "category": [
     "tools"
   ],
+  "tags": {
+    "en": [
+      "bmw",
+      "mini",
+      "car",
+      "ev",
+      "electric car",
+      "charging",
+      "battery",
+      "cardata",
+      "connecteddrive"
+    ]
+  },
   "permissions": [],
   "images": {
     "small": "/assets/images/small.png",
@@ -21,14 +37,21 @@
     "xlarge": "/assets/images/xlarge.png"
   },
   "author": {
-    "name": "Likhan Siddiquee",
-    "email": "likhan.siddiquee@gmail.com"
+    "name": "Seyed Jafari",
+    "email": "hello@seyedjafari.com"
   },
   "contributors": {
     "developers": [
       {
+        "name": "Likhan Siddiquee",
+        "email": "likhan.siddiquee@gmail.com"
+      },
+      {
         "name": "Sander Schutten",
         "email": "sander@dotnetstudio.nl"
+      },
+      {
+        "name": "Glenn Heylen"
       }
     ],
     "translators": [
@@ -68,16 +91,7 @@
       "path": "/getClientTokens"
     }
   },
-  "bugs": {
-    "url": "https://github.com/lsiddiquee/com.rexwel.bmwconnected/issues"
-  },
-  "source": "https://github.com/lsiddiquee/com.rexwel.bmwconnected",
-  "homeyCommunityTopicId": 49199,
-  "contributing": {
-    "donate": {
-      "paypal": {
-        "username": "LikhanSiddiquee"
-      }
-    }
-  }
+  "source": "https://github.com/helloseyedjafari/bmw-cardata-homey",
+  "homepage": "https://github.com/helloseyedjafari/bmw-cardata-homey",
+  "support": "https://github.com/helloseyedjafari/bmw-cardata-homey/issues"
 }

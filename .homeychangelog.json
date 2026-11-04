@@ -115,5 +115,8 @@
   },
   "1.0.14": {
     "en": "Bug fixes"
+  },
+  "1.1.0": {
+    "en": "First release of CarData for BMW & MINI, based on BMW / Mini Connected 1.0.14."
   }
 }
