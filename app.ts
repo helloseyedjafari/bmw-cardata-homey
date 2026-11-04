@@ -145,15 +145,15 @@ export class BMWConnectedDrive extends Homey.App {
 
     // Initialize logger based on configuration
     // If Loki URL is provided, use LokiLogger; otherwise use standard Logger
+    // Both read the level through getCurrentLogLevel on every log call: saving the settings
+    // replaces the configuration object, so a level change applies without restarting the app.
     if (configuration.lokiUrl && configuration.lokiUrl.trim() !== '') {
       this.logger = new LokiLogger(this.homey, configuration.lokiUrl, () =>
-        configuration.logEnabled ? configuration.logLevel : LogLevel.ERROR
+        this.getCurrentLogLevel()
       );
       this.logger.info(`Initialized with Loki logger at ${configuration.lokiUrl}`);
     } else {
-      this.logger = new Logger(this.homey, () =>
-        configuration.logEnabled ? configuration.logLevel : LogLevel.ERROR
-      );
+      this.logger = new Logger(this.homey, () => this.getCurrentLogLevel());
       this.logger.info('Initialized with standard logger');
     }
 
@@ -168,6 +168,18 @@ export class BMWConnectedDrive extends Homey.App {
     // Register condition cards only (read-only)
     // All action cards for remote services have been removed due to BMW CarData API limitations
     this.registerConditionCards();
+  }
+
+  /**
+   * Get the log level from the configuration as it is right now.
+   *
+   * Must not capture the configuration object: the settings page replaces it when saving.
+   *
+   * @returns The configured level, or ERROR (errors only) when logging is disabled
+   */
+  private getCurrentLogLevel(): LogLevel {
+    const configuration = ConfigurationManager.getConfiguration(this.homey);
+    return configuration?.logEnabled ? configuration.logLevel : LogLevel.ERROR;
   }
 
   private registerConditionCards() {
@@ -231,6 +243,38 @@ export class BMWConnectedDrive extends Homey.App {
     this.homey.flow
       .getConditionCard(Flows.CAR_DATA_STREAM_LIVE_CONDITION)
       .registerRunListener((args: { device: Vehicle }) => args.device.isCarDataStreamLive());
+
+    // True when the car reports that it is locked. An unknown state is an error, not "unlocked":
+    // Homey reports the flow error instead of the flow guessing.
+    this.homey.flow
+      .getConditionCard(Flows.CAR_IS_LOCKED_CONDITION)
+      .registerRunListener((args: { device: Vehicle }) => {
+        const status = args.device.getCarLockStatus();
+        if (status === 'UNKNOWN') {
+          throw new Error(
+            "The car's lock state isn't known yet. Nothing you need to do: the app learns it as soon as " +
+              "BMW CarData reports it. If this keeps happening, check that 'vehicle.cabin.door.status' is " +
+              'ticked in the stream selection of the BMW CarData portal.'
+          );
+        }
+        return status === 'LOCKED';
+      });
+
+    // True when the car reports that a charging cable is plugged in. An unknown state is an error,
+    // not "unplugged".
+    this.homey.flow
+      .getConditionCard(Flows.CHARGING_CABLE_IS_CONNECTED_CONDITION)
+      .registerRunListener((args: { device: Vehicle }) => {
+        const status = args.device.getChargingCableStatus();
+        if (status === 'UNKNOWN') {
+          throw new Error(
+            "The charging cable state isn't known yet. Nothing you need to do: the app learns it as soon as " +
+              "BMW CarData reports it. If this keeps happening, check that 'vehicle.body.chargingPort.status' is " +
+              'ticked in the stream selection of the BMW CarData portal.'
+          );
+        }
+        return status === 'CONNECTED';
+      });
   }
 
   /**
