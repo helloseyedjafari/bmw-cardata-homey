@@ -1076,6 +1076,29 @@ describe('Vehicle stream health', () => {
         expect(storeWrites()).toHaveLength(storeWritesBefore);
       });
 
+      it('should_acceptNewData_when_homeyClockSteppedBackBehindTheRecordedTime', async () => {
+        // Recorded while the Homey clock was right
+        await handleMessage(messageMeasuredAt('2026-11-04T13:30:00Z'));
+
+        // The Homey clock steps back an hour (e.g. corrected after running ahead, or reset at boot)
+        jest.setSystemTime(new Date('2026-11-04T12:35:00Z'));
+        await handleMessage(messageMeasuredAt('2026-11-04T12:34:00Z'));
+
+        // The new reading wins instead of being ignored until the clock catches up
+        expect(lastUpdate()).toBe('4 Nov, 13:34');
+        expect(store.get(STORE_KEY_LAST_DATA_UPDATE)).toBe(Date.parse('2026-11-04T12:34:00Z'));
+        expect(vehicle.isCarDataFresh(5)).toBe(true);
+      });
+
+      it('should_acceptNewData_when_storedTimeFromBeforeRestartIsInTheFuture', async () => {
+        store.set(STORE_KEY_LAST_DATA_UPDATE, NOW.getTime() + 3 * 60 * 60_000);
+
+        await handleMessage(messageMeasuredAt('2026-11-04T13:30:00Z'));
+
+        expect(lastUpdate()).toBe('4 Nov, 14:30');
+        expect(store.get(STORE_KEY_LAST_DATA_UPDATE)).toBe(Date.parse('2026-11-04T13:30:00Z'));
+      });
+
       it('should_keepNewerDataTime_when_oldMessageIsReplayedAfterNewerOne', async () => {
         await handleMessage(messageMeasuredAt('2026-11-04T13:31:00Z'));
         const labelWritesBefore = labelWrites().length;

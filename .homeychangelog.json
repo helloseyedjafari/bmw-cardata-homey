@@ -150,6 +150,6 @@
     "en": "Fixed two pairing glitches reported on v1.0.23. Pressing Continue on the Client ID screen no longer triggers stray 'Could not find that PairSession' error toasts when the wizard has already moved on. And if BMW's sign-in server has a brief hiccup (HTTP 500) right after you authorise, the app now quietly waits and retries instead of falsely reporting 'Authorization Failed' — your sign-in is preserved and pairing continues."
   },
   "1.1.0": {
-    "en": "First release of CarData for BMW & MINI, based on BMW / Mini Connected 1.0.25. The live data stream now reconnects by itself after a failed start, a failed login renewal or a network drop, and renews its login before it expires instead of silently falling back to hourly polling. New: 'Car data stream' and 'Last car data' on the device, a 'Car data stream changed' trigger and a 'Car data was updated in the last … minutes' condition. Changing the polling settings now takes effect straight away."
+    "en": "First release of CarData for BMW & MINI, based on BMW / Mini Connected 1.0.25. The live data stream now reconnects by itself after a failed start, a failed login renewal or a network drop, renews its login before it expires, and is checked every minute so it can't stay stopped. New: 'Car data stream' and 'Last car data' (when the car measured its newest data) on the device, a 'Car data stream changed' trigger, and 'Car data stream is live' and 'Car data was updated in the last … minutes' conditions. Changing the polling settings now takes effect straight away."
   }
 }

@@ -732,8 +732,11 @@ export class Vehicle extends Device {
       const now = Date.now();
       const dataTime = Number.isFinite(dataTimeMs) ? Math.min(dataTimeMs, now) : now;
 
+      // Never move backwards, unless the recorded time is ahead of the Homey clock: then the clock
+      // stepped back (or the stored value is bogus) and keeping it would freeze the value until
+      // the clock catches up
       const previous = this.getLastDataUpdateMs();
-      if (previous !== undefined && dataTime < previous) {
+      if (previous !== undefined && previous <= now && dataTime < previous) {
         this.logger?.debug(
           `Ignoring car data older than the last recorded data for vehicle ${this.deviceData.id}`
         );
@@ -742,9 +745,13 @@ export class Vehicle extends Device {
       this._lastDataUpdateMs = dataTime;
 
       // Persist at most once a minute (by time of writing, not data time): messages can arrive
-      // several times a second while driving
+      // several times a second while driving. A clock that stepped back also persists straight away.
       const persistedAt = this._lastDataUpdatePersistedMs;
-      if (persistedAt === undefined || now - persistedAt >= LAST_DATA_UPDATE_PERSIST_INTERVAL_MS) {
+      if (
+        persistedAt === undefined ||
+        now < persistedAt ||
+        now - persistedAt >= LAST_DATA_UPDATE_PERSIST_INTERVAL_MS
+      ) {
         await this.setStoreValue(STORE_KEY_LAST_DATA_UPDATE, dataTime);
         this._lastDataUpdatePersistedMs = now;
       }

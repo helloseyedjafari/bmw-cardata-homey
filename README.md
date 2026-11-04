@@ -160,14 +160,17 @@ To configure streaming in the BMW portal:
 
 ### Stream health
 
-The stream recovers by itself: if it can't start, or a login renewal or the network fails, it retries after 30 s, 1, 2, 4 and 8 minutes, then every 15 minutes until it's back. It also renews its BMW login shortly before the hourly token expires instead of waiting to be rejected.
+The stream recovers by itself. If it can't start, or a login renewal or the network fails, it retries after 30 s, 1, 2, 4 and 8 minutes, then every 15 minutes until it's back. It renews its BMW login shortly before the hourly token expires instead of waiting to be rejected. A once-a-minute check also restarts it if it's ever found stopped with no retry planned.
 
 Each car shows two extra values in Homey:
 
 - **Car data stream**: Live, Connecting, Reconnecting, Off (turned off in the device settings) or Unavailable (the app can't start the stream at all, for example after a failed login).
-- **Last car data**: when the car last sent data, by stream or by API poll.
+- **Last car data**: when the car measured the newest data received, by stream or by API poll. It uses the car's own timestamps, so old data replayed after a reconnect or returned by a poll doesn't look fresh. It never goes backwards, except when the Homey clock itself steps back.
 
-For Flows there's a **Car data stream changed** trigger (with the new state as a tag) and a **Car data was updated in the last … minutes** condition. Use the condition to avoid acting on stale data, for example before working out how much to charge from the battery level.
+For Flows there's a **Car data stream changed** trigger (with the new state as a tag), and two conditions:
+
+- **Car data stream is live**: changes reach Homey within seconds. A parked car can stay silent for hours while the stream is fine, so use this to decide whether a battery level read earlier is still current.
+- **Car data was updated in the last … minutes**: the car measured new data within that time.
 
 ### REST API Polling (Fallback)
 
