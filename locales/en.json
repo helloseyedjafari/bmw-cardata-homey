@@ -43,17 +43,18 @@
   },
   "pair": {
     "client_id": {
-      "title": "BMW CarData Client ID",
-      "description": "Enter your BMW CarData API Client ID to continue. You must register your own application at the BMW Developer Portal to obtain a Client ID.",
+      "title": "CarData Client ID",
+      "description": "Enter the Client ID of your BMW or MINI CarData client. You create it once on the My BMW or My MINI website, so the app can read your car's data.",
       "label": "Client ID",
-      "help": "Your Client ID is a UUID in the format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "help": "The Client ID is a UUID in the format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. After this step the app shows a code to approve with your My BMW or My MINI account.",
       "continue": "Continue",
       "how_to_get": {
         "title": "How to get a Client ID",
-        "step1": "Go to the MyBMW vehicle overview (https://www.bmw.co.uk/en-gb/mybmw/vehicle-overview)",
-        "step2": "Create an account or log in with your existing BMW credentials",
-        "step3": "Register a new application - choose 'Car Data API'",
-        "step4": "Copy your Client ID from the application details"
+        "step1": "Sign in on the My BMW or My MINI website for your country and open your vehicle overview",
+        "step2": "Select your car, open the BMW CarData tile (on MINI: MINI CarData) and press Create CarData Client",
+        "step3": "Switch on both CarData API and CarData Stream, then copy the Client ID. If the portal shows a scope error, reload the page, add one, wait about 30 seconds, then add the other",
+        "step4": "Under CarData Stream, open Change data selection, tick the data items the app needs (listed in the setup guide below) and save",
+        "guide": "Setup guide:"
       }
     },
     "container_id": {
@@ -61,9 +62,9 @@
       "help": "Leave empty to create a new container automatically. If you have multiple vehicles with the same Client ID, they will share the same container. Only provide an existing Container ID if you want to reuse one."
     },
     "device_code": {
-      "title": "BMW CarData Authentication",
+      "title": "CarData Authentication",
       "requesting": "Requesting authorization code...",
-      "instructions": "Follow these steps to authorize access to your BMW:",
+      "instructions": "Follow these steps to authorize access to your car:",
       "step1": "1. Click the button below to open your browser",
       "step2": "2. Enter this code when prompted:",
       "step3": "3. Complete the authorization in your browser",
@@ -85,7 +86,7 @@
       },
       "setup_error": {
         "title": "Device Setup Failed",
-        "hint": "Sign-in succeeded, but setting up the BMW data container failed. Your sign-in is kept, so tapping Try Again will retry just the setup step without asking for a new authorization code."
+        "hint": "Sign-in succeeded, but setting up the car data container failed. Your sign-in is kept, so tapping Try Again will retry just the setup step without asking for a new authorization code."
       }
     }
   }

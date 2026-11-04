@@ -11,8 +11,8 @@
     "en": "CarData for BMW & MINI"
   },
   "description": {
-    "en": "Follow your BMW or MINI's battery, charging, location, doors and windows live in Homey, using BMW's official CarData service.",
-    "nl": "Volg de batterij, het laden, de locatie, deuren en ramen van je BMW of MINI live in Homey, via de officiële CarData-dienst van BMW."
+    "en": "Your BMW or MINI's battery, charging, range, doors and locks live in Homey, with a battery widget for your dashboard.",
+    "nl": "De batterij, het laden, de actieradius, deuren en sloten van je BMW of MINI live in Homey, met een batterijwidget voor je dashboard."
   },
   "brandColor": "#009ADA",
   "category": [
@@ -1011,7 +1011,8 @@
       },
       "images": {
         "small": "/drivers/bmw/assets/images/small.png",
-        "large": "/drivers/bmw/assets/images/large.png"
+        "large": "/drivers/bmw/assets/images/large.png",
+        "xlarge": "/drivers/bmw/assets/images/xlarge.png"
       },
       "icon": "/drivers/bmw/assets/icon.svg",
       "pair": [
@@ -1201,7 +1202,8 @@
       },
       "images": {
         "small": "/drivers/mini/assets/images/small.png",
-        "large": "/drivers/mini/assets/images/large.png"
+        "large": "/drivers/mini/assets/images/large.png",
+        "xlarge": "/drivers/mini/assets/images/xlarge.png"
       },
       "icon": "/drivers/mini/assets/icon.svg",
       "pair": [

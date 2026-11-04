@@ -33,7 +33,8 @@
     },
     "images": {
         "small": "{{driverAssetsPath}}/images/small.png",
-        "large": "{{driverAssetsPath}}/images/large.png"
+        "large": "{{driverAssetsPath}}/images/large.png",
+        "xlarge": "{{driverAssetsPath}}/images/xlarge.png"
     },
     "icon": "{{driverAssetsPath}}/icon.svg",
     "pair": [

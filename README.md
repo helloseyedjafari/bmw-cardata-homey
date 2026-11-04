@@ -1,262 +1,214 @@
 # CarData for BMW & MINI
 
-A Homey Pro app for following your BMW or MINI's battery, charging, location, doors and windows, using BMW's official CarData service.
+Follow your BMW or MINI in Homey Pro: battery level, charging, range, location, doors, windows, locks and climate, live. The app reads your car's data from BMW Group's official **CarData** service. That service is read-only, so the app can't lock or unlock the car, start the climate control or change charging.
 
-This app is based on [BMW / Mini Connected](https://github.com/lsiddiquee/com.rexwel.bmwconnected) by Likhan Siddiquee and its contributors, and is released under the same GPL-3.0 licence. It runs as a separate app with its own app ID (`com.seyedjafari.bmwconnected`), so it can be installed alongside the original. Don't stream with both at once: BMW allows one CarData streaming connection per account.
+- **Live updates.** BMW's data stream sends changes to Homey within seconds. Polling every 30 minutes (BMW allows 50 requests a day) fills in the rest.
+- **Flow cards** for locking, charging, climate, location, geofences and drive sessions.
+- **A "Car battery" dashboard widget** that shows the charge level, charging state and range.
 
-Monitor your BMW or Mini vehicle data in Homey using the official BMW CarData API.
+Built and tested on a BMW iX3. MINI uses exactly the same CarData service (MINI owners use the MINI website), so it should work the same way, but it hasn't been tested with a MINI yet. If you try one, please [tell me how it went](https://github.com/helloseyedjafari/bmw-cardata-homey/issues).
 
-This app provides **read-only** access to vehicle telematics data including location, battery/fuel levels, door/window status, charging information, and more. Real-time updates are delivered via MQTT streaming, with fallback to REST API polling when needed.
+## Requirements
 
-## Prerequisites
+- A My BMW (or My MINI) account with your car added, and you as its **primary driver** (main user).
+- Active BMW ConnectedDrive services, in a country where BMW CarData is offered (most European countries, including the UK).
+- A Homey Pro on software 12.9.0 or later.
 
-### 1. BMW CarData API Access
+## Setup
 
-You must register for the BMW CarData API before pairing your vehicle:
+Setting up has four steps. Steps 1 and 2 happen on the BMW or MINI website, step 3 in the Homey app, and step 4 checks the result.
 
-1. Visit the [BMW ConnectedDrive Customer Portal](https://www.bmw.co.uk/en-gb/mybmw/vehicle-overview)
-2. Log in with your BMW/Mini ConnectedDrive account
-3. Navigate to **CarData** section
-4. **Subscribe** to the **CarData API** service (free)
-5. **Subscribe** to the **CarData Streaming** service (free, optional but recommended)
-6. **Generate a Client ID** (save this for pairing)
-7. Ensure your vehicle is mapped to your account as **PRIMARY** user
+### Step 1: Create a CarData client
 
-**Important**: Complete steps 1-6 **before** adding your vehicle in Homey.
+You do this once per account.
 
-### 2. Vehicle Requirements
+1. Sign in on the My BMW website for your country and open your vehicle overview. For example:
+   - UK: <https://www.bmw.co.uk/en-gb/mybmw/vehicle-overview>
+   - Germany: <https://www.bmw.de/de-de/mybmw/vehicle-overview>
+   - MINI UK: <https://www.mini.co.uk/en-gb/mymini/vehicle-overview>
+   - MINI Germany: <https://www.mini.de/de-de/mymini/vehicle-overview>
+2. Select your car and open the **BMW CarData** tile (on MINI: **MINI CarData**).
+3. Press **Create CarData Client**.
+4. Switch on both **CarData API** and **CarData Stream** (the scopes `cardata:api:read` and `cardata:streaming:read`). If the portal shows a scope error, reload the page, add one of the two, wait about 30 seconds, then add the other.
+5. Copy the **Client ID**. It is a UUID in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
 
-- Vehicle must support BMW ConnectedDrive
-- Active ConnectedDrive contract
-- Active SIM card in vehicle
-- Vehicle location: EU (currently supported region)
-- User mapping: PRIMARY (not SECONDARY/co-user)
+### Step 2: Choose the data the stream sends
 
-## Pairing Your Vehicle
+This step matters. The live stream only sends the items you tick here. Anything you leave out only updates on the half-hourly poll, and drive sessions never finish without the trip items.
 
-1. Open the Homey app and go to **Devices** → **Add Device**
-2. Select **BMW Connected** app
-3. Choose your brand (BMW or Mini)
-4. Follow the **OAuth Device Code Flow** pairing process:
-   - Enter your **Client ID** from the BMW portal
-   - A **user code** and **verification URL** will be displayed
-   - If you cannot click the link, you can use another device to open the [link url here](https://customer.bmwgroup.com/oneid/#/link).
-   - Visit the URL in a browser and enter the code
-   - Authorize the app in the BMW portal
-   - Return to Homey - pairing will complete automatically
-5. **Container Selection** (optional):
-   - A **container** is a BMW CarData API data structure that defines which telematic data keys (e.g., battery level, location, door status) the app can retrieve
-   - If you have an existing container ID from the BMW portal, enter it here
-   - If left empty, the app will **automatically create a new container** with the 46 essential telematic keys needed for Homey monitoring
-   - The container will be named "Homey BMW Integration" with purpose "Vehicle telemetry for Homey smart home"
-6. Select your vehicle from the list
-7. Device will be created with real-time monitoring
+In the same CarData tile, under **CarData Stream**, open **Change data selection**, tick the items below and save.
 
-## Features
+| Powers                       | Data item                                                         | What it is                                                      |
+| ---------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------- |
+| **Battery and charging**     | `vehicle.drivetrain.batteryManagement.header`                     | Battery level                                                   |
+|                              | `vehicle.drivetrain.electricEngine.charging.status`               | Charging status                                                 |
+|                              | `vehicle.drivetrain.electricEngine.charging.timeToFullyCharged`   | Time until fully charged (shown on the widget)                  |
+|                              | `vehicle.drivetrain.electricEngine.kombiRemainingElectricRange`   | Electric range                                                  |
+|                              | `vehicle.drivetrain.lastRemainingRange`                           | Total range                                                     |
+|                              | `vehicle.powertrain.electric.battery.stateOfCharge.target`        | Charge target                                                   |
+|                              | `vehicle.body.chargingPort.status`                                | Charging cable plugged in                                       |
+|                              | `vehicle.body.flap.isLocked`                                      | Charging flap locked                                            |
+| **Location and mileage**     | `vehicle.cabin.infotainment.navigation.currentLocation.latitude`  | Location (latitude)                                             |
+|                              | `vehicle.cabin.infotainment.navigation.currentLocation.longitude` | Location (longitude)                                            |
+|                              | `vehicle.cabin.infotainment.navigation.currentLocation.heading`   | Direction of travel                                             |
+|                              | `vehicle.vehicle.travelledDistance`                               | Mileage                                                         |
+| **Drive sessions**           | `vehicle.trip.segment.end.time`                                   | When a trip ended                                               |
+|                              | `vehicle.trip.segment.end.travelledDistance`                      | Mileage at the end of a trip                                    |
+| **Doors, locks and windows** | `vehicle.cabin.door.status`                                       | Locked or unlocked                                              |
+|                              | `vehicle.cabin.door.row1.driver.isOpen`                           | Front driver's door open                                        |
+|                              | `vehicle.cabin.door.row1.passenger.isOpen`                        | Front passenger's door open                                     |
+|                              | `vehicle.cabin.door.row2.driver.isOpen`                           | Rear door behind the driver open                                |
+|                              | `vehicle.cabin.door.row2.passenger.isOpen`                        | Rear door behind the passenger open                             |
+|                              | `vehicle.body.hood.isOpen`                                        | Hood open                                                       |
+|                              | `vehicle.body.trunk.isOpen`                                       | Trunk open                                                      |
+|                              | `vehicle.cabin.window.row1.driver.status`                         | Front driver's window                                           |
+|                              | `vehicle.cabin.window.row1.passenger.status`                      | Front passenger's window                                        |
+|                              | `vehicle.cabin.window.row2.driver.status`                         | Rear window behind the driver                                   |
+|                              | `vehicle.cabin.window.row2.passenger.status`                      | Rear window behind the passenger                                |
+| **Climate**                  | `vehicle.vehicle.preConditioning.activity`                        | Climate heating, cooling, ventilating or off                    |
+|                              | `vehicle.cabin.hvac.preconditioning.status.comfortState`          | Climate comfort state                                           |
+| **Tyres**                    | `vehicle.chassis.axle.row1.wheel.left.tire.pressure`              | Front left tyre pressure                                        |
+|                              | `vehicle.chassis.axle.row1.wheel.right.tire.pressure`             | Front right tyre pressure                                       |
+|                              | `vehicle.chassis.axle.row2.wheel.left.tire.pressure`              | Rear left tyre pressure                                         |
+|                              | `vehicle.chassis.axle.row2.wheel.right.tire.pressure`             | Rear right tyre pressure                                        |
+|                              | `vehicle.chassis.axle.row1.wheel.left.tire.pressureTarget`        | Front left target pressure                                      |
+|                              | `vehicle.chassis.axle.row1.wheel.right.tire.pressureTarget`       | Front right target pressure                                     |
+|                              | `vehicle.chassis.axle.row2.wheel.left.tire.pressureTarget`        | Rear left target pressure                                       |
+|                              | `vehicle.chassis.axle.row2.wheel.right.tire.pressureTarget`       | Rear right target pressure                                      |
+| **Fuel**                     | `vehicle.drivetrain.fuelSystem.level`                             | Fuel level (plug-in hybrids and petrol or diesel cars only)     |
+|                              | `vehicle.drivetrain.fuelSystem.remainingFuel`                     | Remaining fuel (plug-in hybrids and petrol or diesel cars only) |
+| **Service**                  | `vehicle.status.conditionBasedServicesCount`                      | Number of services due                                          |
 
-### Homey Capabilities
+The app reads the tyre, charge target, heading, climate comfort state and service items but doesn't show them in Homey yet. Ticking them is harmless, and they are ready for when the app does.
 
-This app displays the following data in Homey:
+If you change the data selection later, the change takes effect after a minute or two. The app reconnects by itself.
 
-**All Vehicles:**
+### Step 3: Add the car in Homey
 
-- Mileage (km/miles)
-- Range (total remaining range)
-- Location (GPS map view)
-- Alarm (generic alarm status) (Door lock and/ir secured)
+1. In the Homey app, go to **Devices**, press **+** and choose **CarData for BMW & MINI**.
+2. Choose **BMW** or **MINI**.
+3. Paste the **Client ID** from step 1. Leave **Container ID** empty. The app creates the data container it needs.
+4. Homey shows a code and a link (<https://customer.bmwgroup.com/oneid/#/link>). Open the link on any phone or computer, sign in with your My BMW or My MINI account, enter the code and approve.
+5. Back in Homey, choose your car.
 
-**Electric Vehicles (BEV/PHEV):**
+### Step 4: Check that it works
 
-- Battery level (%)
-- Charging status (charging/not charging/complete)
+The new device should show **Car data stream: Live**. **Last car data** shows when the car last sent data.
 
-**Plugin Hybrid Vehicles (PHEV):**
+A parked car sends very little, so that time can be hours old. To see it work, lock or unlock the car, or switch the climate on in the My BMW app. The values should update within seconds.
 
-- Electric only range (km/miles)
+## What you get in Homey
 
-**Combustion/Hybrid Vehicles:**
+### On the device
 
-- Remaining fuel (liters/gallons)
+| Value                          | Notes                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Battery level                  | Electric and plug-in hybrid cars                                                                              |
+| Charging state                 | Uses the cable sensor as well as the charging status, so "plugged in" and "plugged in, paused" show correctly |
+| Range                          | Total range. Plug-in hybrids also show the electric range                                                     |
+| Fuel level and remaining fuel  | Plug-in hybrids and petrol or diesel cars                                                                     |
+| Mileage                        | In the distance unit of the device settings                                                                   |
+| Doors and windows              | Open or closed (doors include the hood and trunk; windows can also be partly open)                            |
+| Lock state                     | Shown as the alarm indicator, which is on while the car is unlocked                                           |
+| Climate status                 | Heating, cooling, ventilation or inactive                                                                     |
+| Car data stream, Last car data | See [Stream health and polling](#stream-health-and-polling)                                                   |
 
-**Note**: While the app collects additional vehicle data (door status, window status, lock status, tire pressures, etc.) via the BMW CarData API, these are not currently exposed as individual Homey capabilities. They are available internally for future enhancements.
+The car's location isn't a device value. It reaches your Flows through the location, geofence and drive session cards below, with the street address as a tag.
 
-### Flow Cards
+### Flow cards
 
-**Triggers:**
+Triggers fire only when a value really changes between two known states: never on the first data after the app starts, and never because a value is missing. Most cards depend on specific data items from [step 2](#step-2-choose-the-data-the-stream-sends). The right-hand column says which ones to tick. "The location items" are the three `currentLocation` items, and "the fuel items" are the two `fuelSystem` items.
 
-- Location changed
-- Battery level changed
-- Fuel level changed (combustion/hybrid)
-- Charging status changed (electric/hybrid)
-- Refueling detected (combustion/hybrid)
-- Trip completed (vehicle stopped after movement)
+| Trigger                                     | Fires when                                                                                                 | Needs these data items                                                        |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| The car was locked / unlocked               | the car's lock state changes (BMW sends it only now and then, so it can lag)                               | `vehicle.cabin.door.status`                                                   |
+| The charging flap was locked / unlocked     | the charging flap lock changes                                                                             | `vehicle.body.flap.isLocked`                                                  |
+| A charging cable was plugged in / unplugged | the cable is connected or disconnected                                                                     | `vehicle.body.chargingPort.status`                                            |
+| Charging status changed                     | charging starts, pauses, ends, errors and so on (the new status is a tag)                                  | `vehicle.drivetrain.electricEngine.charging.status`                           |
+| Battery level changed and is above ...      | every change of the battery level while it is above X (with 80: at 81, again at 82, and so on; not at 80)  | `vehicle.drivetrain.batteryManagement.header`                                 |
+| Climate started / stopped / status changed  | climate preconditioning starts, stops or changes mode                                                      | `vehicle.vehicle.preConditioning.activity`                                    |
+| Location changed                            | the car has moved more than 50 m, or entered or left a geofence (label, coordinates and address are tags)  | the location items                                                            |
+| Geofence entered / exited                   | the car enters or leaves a geofence you set up in the app settings                                         | the location items                                                            |
+| Drive session started                       | the car first moves more than 50 m after being parked (start location and mileage are tags)                | the location items, `vehicle.trip.segment.end.*`                              |
+| Drive session completed                     | a trip ends (start and end location and mileage are tags)                                                  | `vehicle.trip.segment.end.time`, `vehicle.trip.segment.end.travelledDistance` |
+| Refuelled                                   | the fuel level rises by more than the threshold in the device settings (petrol, diesel and plug-in hybrid) | the fuel items                                                                |
+| Car data stream changed                     | the stream goes Live, Reconnecting, Off or Unavailable (the new state is a tag)                            | none                                                                          |
 
-**Conditions:**
+| Condition                                             | True when                                                                         | Needs these data items                              |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------- |
+| The car is / isn't locked                             | the car is locked                                                                 | `vehicle.cabin.door.status`                         |
+| A charging cable is / isn't plugged in                | a charging cable is plugged in                                                    | `vehicle.body.chargingPort.status`                  |
+| Charging status is / is not ...                       | the charging status matches the one you pick                                      | `vehicle.drivetrain.electricEngine.charging.status` |
+| Battery charge is less than ...                       | the battery level is below the percentage you enter (or at or above, if inverted) | `vehicle.drivetrain.batteryManagement.header`       |
+| Inside / outside of geofence ...                      | the car is inside or outside the geofence you pick                                | the location items                                  |
+| Car data stream is / isn't live                       | changes reach Homey within seconds                                                | none                                                |
+| Car data was / wasn't updated in the last ... minutes | the car measured new data within that time                                        | none                                                |
 
-- Battery level is above/below X%
-- Fuel level is above/below X%
-- Vehicle is charging (yes/no)
-- Vehicle is inside geofence (specific location)
+When the data a condition needs isn't known yet, the flow stops with an error that says so, instead of guessing.
 
-**Actions:**
-
-- None (read-only API)
+There are no action cards, because CarData is read-only.
 
 ### Dashboard widget
 
-**Car battery** shows a car's battery level on a Homey dashboard. When you add it, pick the car,
-a style (Battery, Circle or Large number) and a light or dark background. Besides the level it shows:
+**Car battery** shows a car's battery level on a Homey dashboard. When you add it, pick the car, a style (Battery, Circle or Large number) and a light or dark background. Besides the level it shows:
 
 - the charging state: Charging, Plugged in, Low battery (under 20%) or Parked
 - when charging will finish, or otherwise how long ago the car last sent data
 - the remaining range, in the distance unit of the car's device settings
 
-The colour follows the level: blue from 50%, amber from 20% and red below that. The widget updates
-within seconds of new car data and whenever the dashboard is opened.
+The colour follows the level: blue from 50%, amber from 20% and red below that. The widget updates within seconds of new car data and whenever the dashboard is opened.
 
-## Data Delivery: MQTT Streaming vs API Polling
+## Stream health and polling
 
-The BMW CarData API provides two methods for retrieving vehicle data:
-
-### MQTT Streaming (Recommended)
-
-**How it works:**
-
-- Real-time push notifications via MQTT protocol
-- Updates delivered within seconds when vehicle data changes
-- **No impact on API quota** (unlimited)
-- Battery-efficient for Homey
-
-**Requirements:**
-
-- CarData Streaming subscription (free, enabled in BMW portal)
-- Configure which telematic data keys to receive in the portal
-
-**Telematic Keys Used by Homey:**
-
-This app subscribes to **46 essential telematic keys** out of 244 available keys for comprehensive vehicle monitoring. The keys are organized by category:
-
-**Core Vehicle Data (46 keys total):**
-
-- **Electric Battery & Charging** (10 keys): `vehicle.electricalSystem.battery.stateOfCharge`, `vehicle.body.chargingPort.status`, `vehicle.body.chargingPort.dcStatus`, `vehicle.drivetrain.electricEngine.remainingElectricRange`, `vehicle.drivetrain.batteryManagement.header`, `vehicle.drivetrain.electricEngine.kombiRemainingElectricRange`, `vehicle.drivetrain.electricEngine.charging.status`, `vehicle.drivetrain.electricEngine.charging.timeToFullyCharged`, `vehicle.powertrain.electric.battery.stateOfCharge.target`, plus trip segment HV SOC
-- **Combustion Fuel** (3 keys): `vehicle.drivetrain.fuelSystem.level`, `vehicle.drivetrain.fuelSystem.remainingFuel`, `vehicle.drivetrain.totalRemainingRange`, `vehicle.drivetrain.lastRemainingRange`
-- **Location** (4 keys): `vehicle.cabin.infotainment.navigation.currentLocation.latitude`, `vehicle.cabin.infotainment.navigation.currentLocation.longitude`, `vehicle.cabin.infotainment.navigation.currentLocation.heading`, `vehicle.cabin.infotainment.navigation.currentLocation.altitude`
-- **Doors** (4 keys): `vehicle.cabin.door.row1.driver.isOpen`, `vehicle.cabin.door.row1.passenger.isOpen`, `vehicle.cabin.door.row2.driver.isOpen`, `vehicle.cabin.door.row2.passenger.isOpen`
-- **Windows** (4 keys): `vehicle.cabin.window.row1.driver.status`, `vehicle.cabin.window.row1.passenger.status`, `vehicle.cabin.window.row2.driver.status`, `vehicle.cabin.window.row2.passenger.status`
-- **Lock State** (1 key): `vehicle.cabin.door.status` (SECURED/UNLOCKED)
-- **Trunk & Hood** (3 keys): `vehicle.body.trunk.isOpen`, `vehicle.body.trunk.isLocked`, `vehicle.body.hood.isOpen`
-- **Sunroof** (1 key): `vehicle.cabin.sunroof.status`
-- **Vehicle Status** (3 keys): `vehicle.vehicle.travelledDistance`, `vehicle.isMoving`, `vehicle.drivetrain.engine.isActive`
-- **Climate** (2 keys): `vehicle.vehicle.preConditioning.activity`, `vehicle.cabin.hvac.preconditioning.status.comfortState`
-- **Tire Pressures** (8 keys): All 4 wheels pressure + target values (`vehicle.chassis.axle.row1/row2.wheel.left/right.tire.pressure` and `pressureTarget`)
-- **Service** (1 key): `vehicle.status.conditionBasedServicesCount`
-
-**Trip Detection (3 keys):**
-
-The app also monitors trip completion using these additional keys:
-
-- `vehicle.trip.segment.end.time` - Timestamp when trip ended
-- `vehicle.trip.segment.end.travelledDistance` - Mileage at trip end
-- `vehicle.trip.segment.end.drivetrain.batteryManagement.hvSoc` - Battery SOC at trip end
-
-These trip segment keys enable the app to detect when a journey is completed and trigger the "trip completed" flow card.
-
-To configure streaming in the BMW portal:
-
-1. Navigate to **CarData** → **Configure Data Stream**
-2. Select the telematic keys you want to receive (Homey uses 46 keys)
-3. Save configuration
-4. Credentials will be visible for use
-
-**Status:** Automatically enabled if streaming subscription is active.
-
-### Stream health
-
-The stream recovers by itself. If it can't start, or a login renewal or the network fails, it retries after 30 s, 1, 2, 4 and 8 minutes, then every 15 minutes until it's back. It renews its BMW login shortly before the hourly token expires instead of waiting to be rejected. A once-a-minute check also restarts it if it's ever found stopped with no retry planned.
+The live stream recovers by itself. If it can't start, or a login renewal or the network fails, it retries after 30 seconds, then 1, 2, 4 and 8 minutes, then every 15 minutes until it's back. It renews its BMW login shortly before the hourly token expires instead of waiting to be rejected, and a once-a-minute check restarts it if it's ever found stopped with no retry planned.
 
 Each car shows two extra values in Homey:
 
-- **Car data stream**: Live, Connecting, Reconnecting, Off (turned off in the device settings) or Unavailable (the app can't start the stream at all, for example after a failed login).
-- **Last car data**: when the car measured the newest data received, by stream or by API poll. It uses the car's own timestamps, so old data replayed after a reconnect or returned by a poll doesn't look fresh. It never goes backwards, except when the Homey clock itself steps back.
+- **Car data stream**: Live, Connecting, Reconnecting, Off (turned off in the device settings) or Unavailable (the app can't start the stream at all, for example after a failed sign-in).
+- **Last car data**: when the car measured the newest data received, by stream or by poll. It uses the car's own timestamps, so old data replayed after a reconnect doesn't look fresh.
 
-For Flows there's a **Car data stream changed** trigger (with the new state as a tag), and two conditions:
+A parked car can stay silent for hours while the stream is perfectly fine. Use the **Car data stream is live** condition to decide whether a battery level read earlier is still current.
 
-- **Car data stream is live**: changes reach Homey within seconds. A parked car can stay silent for hours while the stream is fine, so use this to decide whether a battery level read earlier is still current.
-- **Car data was updated in the last … minutes**: the car measured new data within that time.
-
-### Flow cards
-
-Triggers fire only when a value really changes between two known states: never on the first data after the app starts, and never because a value is missing.
-
-| Trigger                                                                        | Fires when                                                                                        | Needs these items ticked in the BMW CarData stream  |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| The car was locked / unlocked                                                  | the car's lock state changes (BMW sends it only now and then, so it can lag)                      | `vehicle.cabin.door.status`                         |
-| The charging flap was locked / unlocked                                        | the charging flap lock changes                                                                    | `vehicle.body.flap.isLocked`                        |
-| A charging cable was plugged in / unplugged                                    | the cable is connected or disconnected                                                            | `vehicle.body.chargingPort.status`                  |
-| Charging status changed                                                        | charging starts, pauses, ends, errors and so on                                                   | `vehicle.drivetrain.electricEngine.charging.status` |
-| Battery level changed and is above X%                                          | every change of the battery level while it is above X (with 80: at 81, again at 82, …; not at 80) | `vehicle.drivetrain.batteryManagement.header`       |
-| Climate started / stopped / status changed                                     | climate preconditioning starts, stops or changes mode                                             | `vehicle.vehicle.preConditioning.activity`          |
-| Car data stream changed                                                        | the stream goes Live, Reconnecting, Off or Unavailable                                            | —                                                   |
-| Location changed, geofence entered / exited, drive session started / completed | the car reports a new location or the end of a trip                                               | the location and `vehicle.trip.segment.end.*` items |
-
-Conditions: the car is locked, a charging cable is plugged in, charging status is …, battery charge is less than …, inside a geofence, car data stream is live, car data was updated in the last … minutes. When the data a condition needs isn't known yet, the flow stops with an error that says so, instead of guessing.
-
-The charging state uses the cable sensor as well as the charging status, so a car that's plugged in and waiting for a scheduled start shows "plugged in", and a paused charge shows "plugged in, paused".
-
-### REST API Polling (Fallback)
-
-**How it works:**
-
-- Periodic HTTP requests to fetch vehicle data
-- **Strict quota: 50 requests per 24 hours**
-- Counter starts from first request, expires 24 hours later
-- **Manually enabled/disabled in device settings**
-
-**Rate Limit Implications:**
-
-- 50 requests/24h = 1 request per ~29 minutes maximum
-- Recommended: Use MQTT streaming instead
-- API polling should only be used as fallback when MQTT unavailable
-
-**Configuration:**
-
-API polling is controlled via device settings:
-
-- Navigate to **Device Settings** → **Enable API polling** (checkbox)
-- Default: **Enabled** after pairing
-- **Recommended**: Disable API polling once MQTT streaming is confirmed working to conserve quota
-
-**Warning:** Do **not** enable frequent polling unless MQTT is unavailable. The 50 request limit is easily exhausted with polling intervals under 30 minutes.
+**Polling is the fallback.** The app also asks BMW for the car's data every 30 minutes. That covers anything the stream doesn't send and fills the gaps when the stream is down. BMW allows 50 requests a day, so the interval can't be set below 30 minutes.
 
 ## Settings
 
-You can control data delivery methods in each device's settings:
+Device settings (open the device in the Homey app, then its settings):
 
-- **Enable MQTT streaming** (checkbox, default: enabled): Real-time push updates via MQTT protocol
-- **Enable API polling** (checkbox, default: enabled): Periodic REST API polling for vehicle data
-- **API polling interval** (number, default: 60 minutes): How often to poll the API when enabled
+- **Distance unit** and **Fuel unit**: kilometres or miles, and litres or US or UK gallons.
+- **Enable MQTT streaming**: the live stream. On by default.
+- **Enable API polling** and **API polling interval (minutes)**: the polling fallback. On by default, every 30 minutes (30 to 1440).
+- **Refuelled trigger threshold (litre)**: how much the fuel level must rise to count as refuelling. 5 by default.
 
-**Recommended Configuration:**
+App settings (Apps, CarData for BMW & MINI, Configure): your **geofences** for the geofence cards, and logging options for troubleshooting.
 
-1. After pairing, verify MQTT streaming is working (check logs or observe real-time updates)
-2. Once confirmed, **disable API polling** to conserve the 50 req/24h quota
-3. Use MQTT streaming as primary data source
-4. Only re-enable API polling if MQTT streaming fails
+## Troubleshooting
 
-The app automatically:
+- **A value only updates every half hour, not live.** That data item isn't ticked under **Change data selection**. Tick it in [step 2](#step-2-choose-the-data-the-stream-sends). The change takes effect after a minute or two.
+- **Drive sessions never end.** Tick the two trip items, `vehicle.trip.segment.end.time` and `vehicle.trip.segment.end.travelledDistance`.
+- **Scope error when creating the CarData client.** See step 1, point 4: reload the page, add one scope, wait about 30 seconds, then add the other.
+- **The stream keeps disconnecting and reconnecting.** BMW allows **one** live stream per account. If another client streams from the same account, the two disconnect each other. Examples are the original "BMW / Mini Connected" Homey app with streaming on, Home Assistant BMW CarData integrations and evcc. Turn the stream off in all but one of them.
+- **Last car data is hours old.** That's normal for a parked car. Lock or unlock the car, or start the climate in the My BMW app, and it should update within seconds.
+- **Car data stream says Unavailable.** The app can't start the stream, for example after a failed sign-in. Use the device's **Repair** option to sign in again.
+- **The code in Homey expired.** The code is valid for a few minutes. Press **Try Again** to get a new one.
+- **The lock state arrives late.** BMW sends the lock state only now and then, so lock and unlock Flows can run late.
 
-- Manages authentication token refresh (OAuth tokens expire after 1 hour)
-- Handles container creation/validation for telematic data
-- Retries failed API requests with exponential backoff
-- Merges MQTT and API data intelligently (timestamp-based coherence)
+Still stuck? [Open an issue](https://github.com/helloseyedjafari/bmw-cardata-homey/issues) and say which car, which items you ticked and what the device shows for **Car data stream**.
 
-## Acknowledgements
+## Privacy
 
-- Use at your own risk. I accept no responsibility for any damages caused by using this app.
-- Reverse geo coding data is provided under ODbL and © OpenStreetMap contributors. Further details <https://www.openstreetmap.org/copyright>.
+The app talks only to BMW Group's CarData servers and, to turn the car's coordinates into a street address, to OpenStreetMap (which only receives the coordinates). Your car data, sign-in and settings stay on your Homey. There is no other server and no analytics. The only exception is the optional Grafana Loki log address in the app settings: logs go there only if you enter one yourself.
 
-## Useful links
+## Credits
 
-- [Source code](https://github.com/helloseyedjafari/bmw-cardata-homey)
-- [Report a problem](https://github.com/helloseyedjafari/bmw-cardata-homey/issues)
-- [Original app: BMW / Mini Connected](https://github.com/lsiddiquee/com.rexwel.bmwconnected)
+This app is based on [BMW / Mini Connected](https://github.com/lsiddiquee/com.rexwel.bmwconnected) by Likhan Siddiquee and its contributors, and is released under the same [GPL-3.0 licence](LICENSE). It runs as a separate app with its own app ID (`com.seyedjafari.bmwconnected`), so it can be installed alongside the original. Don't stream with both at once, because BMW allows one CarData stream per account.
+
+Source code and support: <https://github.com/helloseyedjafari/bmw-cardata-homey>.
+
+The store banner photo is by [Martin Katler](https://unsplash.com/@martinkatler) on Unsplash.
+
+## Disclaimer
+
+This app is not made or endorsed by BMW Group or MINI. BMW, MINI, My BMW and ConnectedDrive are trademarks of their owners. Use it at your own risk: I accept no responsibility for any damage caused by using this app.
+
+Street addresses come from OpenStreetMap, data © OpenStreetMap contributors, available under the [ODbL](https://www.openstreetmap.org/copyright).
