@@ -2,6 +2,7 @@ import {
   getStreamRetryDelayMs,
   STREAM_RETRY_DELAYS_MS,
   STREAM_RETRY_MAX_DELAY_MS,
+  STREAM_WATCHDOG_INTERVAL_MS,
 } from '../../utils/StreamRetry';
 
 describe('StreamRetry', () => {
@@ -21,5 +22,9 @@ describe('StreamRetry', () => {
   it('should_useFirstDelay_when_attemptCountIsZeroOrNegative', () => {
     expect(getStreamRetryDelayMs(0)).toBe(STREAM_RETRY_DELAYS_MS[0]);
     expect(getStreamRetryDelayMs(-3)).toBe(STREAM_RETRY_DELAYS_MS[0]);
+  });
+
+  it('should_checkTheStreamOnceAMinute_when_watchdogRuns', () => {
+    expect(STREAM_WATCHDOG_INTERVAL_MS).toBe(60_000);
   });
 });

@@ -32,11 +32,12 @@ import {
   StreamState,
   StreamStateContext,
 } from '../utils/StreamState';
-import { getStreamRetryDelayMs } from '../utils/StreamRetry';
+import { getStreamRetryDelayMs, STREAM_WATCHDOG_INTERVAL_MS } from '../utils/StreamRetry';
 import {
   formatLastUpdate,
   isCarDataFresh as isTimestampFresh,
   LAST_DATA_UPDATE_PERSIST_INTERVAL_MS,
+  resolveCarDataTimeMs,
 } from '../utils/CarDataFreshness';
 import type { ConnectionState } from '../lib/streaming/IMqttClient';
 
@@ -67,7 +68,7 @@ export class Vehicle extends Device {
 
   // Stream start retry state. These are intentionally declared without initializers and read
   // with `?? default`, so they behave the same when a test builds a Vehicle without its constructor.
-  // Timer for the next scheduled stream start attempt (exponential backoff)
+  // Homey-managed timer for the next scheduled stream start attempt (exponential backoff)
   private _streamRetryTimer?: NodeJS.Timeout;
   // Consecutive failed stream start attempts since the last successful start (undefined = 0)
   private _streamRetryAttempt?: number;
@@ -80,11 +81,14 @@ export class Vehicle extends Device {
   private _streamingEnabled?: boolean;
   // Last stream state shown in the cardata_stream_state capability
   private _streamState?: StreamState;
+  // Homey-managed interval that restarts a stopped stream (see runStreamWatchdog)
+  private _streamWatchdogTimer?: NodeJS.Timeout;
   // Last text shown in the cardata_last_update capability
   private _lastUpdateLabel?: string;
-  // Time real car data last arrived (epoch ms), kept in memory between throttled store writes
+  // Time the car measured the newest data we received (epoch ms), kept in memory between throttled
+  // store writes
   private _lastDataUpdateMs?: number;
-  // Time last written to the device store (epoch ms)
+  // Time (wall clock) the last-update value was last written to the device store (epoch ms)
   private _lastDataUpdatePersistedMs?: number;
 
   // Device state manager for persistence (required - init fails if unavailable)
@@ -225,6 +229,7 @@ export class Vehicle extends Device {
    * 4. Update capabilities from initial status
    * 5. Start MQTT streaming
    * 6. Start API polling
+   * 7. Start the stream watchdog
    *
    * @public Used by onInit and ConnectedDriver repair flow
    */
@@ -232,6 +237,7 @@ export class Vehicle extends Device {
     // Cleanup existing connections (safe to call even if nothing running).
     // Cancelling also drops a pending stream start retry so re-initialisation starts from scratch.
     this.cancelStreamRetry();
+    this.stopStreamWatchdog();
     await this.disposeMqttClient();
     this.stopApiPolling();
 
@@ -252,6 +258,9 @@ export class Vehicle extends Device {
 
     // Start API polling for periodic updates
     this.startApiPolling();
+
+    // Keep an eye on the stream from now on
+    this.startStreamWatchdog();
 
     this.logger?.info(`Vehicle data and services initialized for device ${this.deviceData.id}`);
   }
@@ -450,7 +459,7 @@ export class Vehicle extends Device {
    */
   private async scheduleStreamRetry(): Promise<void> {
     if (this._streamRetryTimer) {
-      clearTimeout(this._streamRetryTimer);
+      this.homey.clearTimeout(this._streamRetryTimer);
     }
 
     const failedAttempts = (this._streamRetryAttempt ?? 0) + 1;
@@ -460,7 +469,7 @@ export class Vehicle extends Device {
     this.logger?.info(
       `Retrying MQTT streaming for vehicle ${this.deviceData.id} in ${delayMs / 1000} seconds (failed attempts: ${failedAttempts})`
     );
-    this._streamRetryTimer = setTimeout(() => {
+    this._streamRetryTimer = this.homey.setTimeout(() => {
       this._streamRetryTimer = undefined;
       void this.startMqttStream();
     }, delayMs);
@@ -477,7 +486,7 @@ export class Vehicle extends Device {
   private cancelStreamRetry(): void {
     this._streamGeneration = (this._streamGeneration ?? 0) + 1;
     if (this._streamRetryTimer) {
-      clearTimeout(this._streamRetryTimer);
+      this.homey.clearTimeout(this._streamRetryTimer);
       this._streamRetryTimer = undefined;
     }
     this._streamRetryAttempt = 0;
@@ -490,6 +499,93 @@ export class Vehicle extends Device {
    */
   private isStreamAttemptCancelled(generation: number): boolean {
     return (this._streamGeneration ?? 0) !== generation;
+  }
+
+  /**
+   * Start the stream watchdog: a Homey-managed interval that checks once a minute whether the
+   * MQTT stream has silently stopped (see {@link runStreamWatchdog}).
+   *
+   * Replaces a running watchdog, so restarting the services never leaves two behind.
+   */
+  private startStreamWatchdog(): void {
+    this.stopStreamWatchdog();
+    this._streamWatchdogTimer = this.homey.setInterval(() => {
+      this.runStreamWatchdog();
+    }, STREAM_WATCHDOG_INTERVAL_MS);
+  }
+
+  /**
+   * Stop the stream watchdog. Safe to call when it is not running.
+   */
+  private stopStreamWatchdog(): void {
+    if (this._streamWatchdogTimer) {
+      this.homey.clearInterval(this._streamWatchdogTimer);
+      this._streamWatchdogTimer = undefined;
+    }
+  }
+
+  /**
+   * One tick of the stream watchdog.
+   *
+   * The MQTT client recovers by itself after an established connection drops, and a failed start
+   * schedules its own retry. This catches what neither covers: a stream that is wanted but has no
+   * client, or whose client is `disconnected` or in `error`, while no retry is pending and no
+   * start attempt is running. In that case the stream is started again. In every other case
+   * nothing happens.
+   *
+   * Never throws: a failing check must not stop the interval or break the device.
+   */
+  private runStreamWatchdog(): void {
+    try {
+      if (!this.isStreamFoundStopped()) {
+        return;
+      }
+
+      this.logger?.warn('MQTT stream found stopped with no retry pending - restarting');
+      void this.startMqttStream().catch((error: unknown) => {
+        this.logStreamWatchdogError(error);
+      });
+    } catch (error) {
+      this.logStreamWatchdogError(error);
+    }
+  }
+
+  /**
+   * Whether the stream is wanted and could be started, but nothing is running or scheduled.
+   */
+  private isStreamFoundStopped(): boolean {
+    // Same effective setting as the stream code (see getStreamStateContext)
+    const streamingEnabled = this._streamingEnabled ?? this.settings.streamingEnabled;
+    if (!streamingEnabled) {
+      return false;
+    }
+
+    if (!this._authProvider || !this.api) {
+      return false;
+    }
+
+    // A scheduled retry or a running attempt will take care of it
+    if (this._streamRetryTimer !== undefined) {
+      return false;
+    }
+    if (this._streamAttemptGeneration === (this._streamGeneration ?? 0)) {
+      return false;
+    }
+
+    const state = this._mqttClient?.getConnectionState();
+    return state === undefined || state === 'disconnected' || state === 'error';
+  }
+
+  /**
+   * Log a failure of a watchdog tick.
+   *
+   * @param error - The error that was caught
+   */
+  private logStreamWatchdogError(error: unknown): void {
+    this.logger?.error(
+      `MQTT stream watchdog failed for vehicle ${this.deviceData.id}`,
+      error instanceof Error ? error : undefined
+    );
   }
 
   /**
@@ -603,25 +699,57 @@ export class Vehicle extends Device {
   }
 
   /**
-   * Remember that real car data just arrived (MQTT message or successful REST poll).
+   * Check whether the MQTT stream is live right now, i.e. connected and delivering data.
+   *
+   * Used by the `car_data_stream_live` flow condition: while it is true, changes reach Homey
+   * within seconds. Only the state of this process counts; the capability value left over from
+   * before an app restart says nothing about the current stream.
+   *
+   * @returns True only when the stream state is `connected`
+   */
+  isCarDataStreamLive(): boolean {
+    return this._streamState === StreamState.CONNECTED;
+  }
+
+  /**
+   * Remember the time the car measured the newest data we just received (MQTT message or
+   * successful REST poll). Not the time we received it: a message replayed after a reconnect or a
+   * poll that returns hours-old values must not make the data look fresh.
+   *
+   * The value only moves forward: older data leaves the recorded time, the label and the store
+   * untouched (the last recorded time is also read from the store, so this holds right after an
+   * app restart). The data time is clamped to now, as BMW and Homey clocks can differ.
    *
    * Keeps the exact time in memory and persists it in the device store at most once a minute
-   * (survives restarts, used by the `car_data_fresh` condition), and shows it in the `cardata_last_update` capability in the
-   * Homey's timezone. Never throws: bookkeeping must not break data handling.
+   * (survives restarts, used by the `car_data_fresh` condition), and shows it in the
+   * `cardata_last_update` capability in the Homey's timezone. Never throws: bookkeeping must not
+   * break data handling.
+   *
+   * @param dataTimeMs - When the car measured the data (epoch ms, see resolveCarDataTimeMs)
    */
-  private async recordCarDataUpdate(): Promise<void> {
+  private async recordCarDataUpdate(dataTimeMs: number): Promise<void> {
     try {
       const now = Date.now();
-      this._lastDataUpdateMs = now;
+      const dataTime = Number.isFinite(dataTimeMs) ? Math.min(dataTimeMs, now) : now;
 
-      // Persist at most once a minute: messages can arrive several times a second while driving
+      const previous = this.getLastDataUpdateMs();
+      if (previous !== undefined && dataTime < previous) {
+        this.logger?.debug(
+          `Ignoring car data older than the last recorded data for vehicle ${this.deviceData.id}`
+        );
+        return;
+      }
+      this._lastDataUpdateMs = dataTime;
+
+      // Persist at most once a minute (by time of writing, not data time): messages can arrive
+      // several times a second while driving
       const persistedAt = this._lastDataUpdatePersistedMs;
       if (persistedAt === undefined || now - persistedAt >= LAST_DATA_UPDATE_PERSIST_INTERVAL_MS) {
-        await this.setStoreValue(STORE_KEY_LAST_DATA_UPDATE, now);
+        await this.setStoreValue(STORE_KEY_LAST_DATA_UPDATE, dataTime);
         this._lastDataUpdatePersistedMs = now;
       }
 
-      const label = formatLastUpdate(now, this.getHomeyTimeZone());
+      const label = formatLastUpdate(dataTime, this.getHomeyTimeZone());
       if (label !== this._lastUpdateLabel) {
         await this.setCapabilityValueSafe(Capabilities.CARDATA_LAST_UPDATE, label);
         this._lastUpdateLabel = label;
@@ -645,18 +773,32 @@ export class Vehicle extends Device {
   }
 
   /**
-   * Check whether car data was updated within the given number of minutes.
+   * Get the time the car measured the newest data we received (epoch ms).
    *
-   * Used by the `car_data_fresh` flow condition. A device that never received data is not fresh.
+   * The in-memory time is the most recent; the store covers the time before an app restart.
    *
-   * @param minutes - Maximum age of the last update, in minutes
-   * @returns True when real car data arrived within the last `minutes` minutes
+   * @returns Epoch milliseconds, or undefined when no car data was ever recorded
+   */
+  private getLastDataUpdateMs(): number | undefined {
+    if (this._lastDataUpdateMs !== undefined) {
+      return this._lastDataUpdateMs;
+    }
+    const stored: unknown = this.getStoreValue(STORE_KEY_LAST_DATA_UPDATE);
+    return typeof stored === 'number' && Number.isFinite(stored) ? stored : undefined;
+  }
+
+  /**
+   * Check whether the car's data is recent: the car measured it within the given number of minutes.
+   *
+   * Used by the `car_data_fresh` flow condition. This is the time the car measured the data, not
+   * the time it arrived, so a replayed message or a poll with old values is not fresh. A device
+   * that never received data is not fresh.
+   *
+   * @param minutes - Maximum age of the newest data, in minutes
+   * @returns True when the newest data was measured within the last `minutes` minutes
    */
   isCarDataFresh(minutes: number): boolean {
-    // The in-memory time is the most recent; the store covers the time before an app restart
-    const lastUpdate: unknown =
-      this._lastDataUpdateMs ?? this.getStoreValue(STORE_KEY_LAST_DATA_UPDATE);
-    return isTimestampFresh(lastUpdate, minutes);
+    return isTimestampFresh(this.getLastDataUpdateMs(), minutes);
   }
 
   /**
@@ -674,8 +816,8 @@ export class Vehicle extends Device {
       // Update state from MQTT message (ALWAYS happens regardless of trip detection)
       this.stateManager.updateFromMqttMessage(message);
 
-      // Real car data just arrived
-      await this.recordCarDataUpdate();
+      // Real car data just arrived: remember when the car measured it
+      await this.recordCarDataUpdate(resolveCarDataTimeMs(message.data, message.timestamp));
 
       // Check if message contains TRIP category telematic data and update debounce
       await this.checkAndDebounceTripCompletion(message);
@@ -836,8 +978,8 @@ export class Vehicle extends Device {
       // Update state manager cache with API data
       await this.stateManager.updateFromApi(rawData);
 
-      // Real car data just arrived
-      await this.recordCarDataUpdate();
+      // Real car data just arrived: remember when the car measured it
+      await this.recordCarDataUpdate(resolveCarDataTimeMs(rawData));
 
       this.logger?.debug(
         `API poll completed for vehicle ${this.deviceData.id} (${Object.keys(rawData).length} telematic keys)`
@@ -1314,12 +1456,15 @@ export class Vehicle extends Device {
   }
 
   /**
-   * Stop everything that keeps running in the background for this device: stream start retries,
-   * the MQTT stream, API polling and the trip debounce timer.
+   * Stop everything that keeps running in the background for this device: the stream watchdog,
+   * stream start retries, the MQTT stream, API polling and the trip debounce timer.
    *
    * Idempotent, so it is safe to call from both onDeleted and onUninit.
    */
   private async stopBackgroundServices(): Promise<void> {
+    // Stop the watchdog first so it cannot restart the stream while we are shutting it down
+    this.stopStreamWatchdog();
+
     // Cancel pending stream start retries (and abandon an in-flight attempt)
     this.cancelStreamRetry();
 

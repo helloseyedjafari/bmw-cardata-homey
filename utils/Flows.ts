@@ -14,6 +14,7 @@ export const Flows = {
   BATTERY_PERCENTAGE_CONDITION: 'battery_percentage',
   CHARGING_STATUS_CONDITION: 'charging_status',
   CAR_DATA_FRESH_CONDITION: 'car_data_fresh',
+  CAR_DATA_STREAM_LIVE_CONDITION: 'car_data_stream_live',
 } as const;
 
 export type FlowId = (typeof Flows)[keyof typeof Flows];

@@ -14,7 +14,7 @@ import { DeviceStateManager } from '../../utils/DeviceStateManager';
 import { ILogger } from '../../lib/types/ILogger';
 import { DeviceCodeAuthProvider } from '../../lib/auth/DeviceCodeAuthProvider';
 import { CarDataClient } from '../../lib/api/CarDataClient';
-import { createMockedVehicle } from '../helpers/vehicleTestHelper';
+import { createHomeyTimers, createMockedVehicle } from '../helpers/vehicleTestHelper';
 
 // Mock dependencies
 jest.mock('../../lib/streaming/MqttStreamClient');
@@ -50,6 +50,8 @@ describe('Vehicle MQTT and Initialization', () => {
       flow: {
         getDeviceTriggerCard: jest.fn(),
       },
+      // Failed stream starts schedule their retry with Homey's timers
+      ...createHomeyTimers(),
     };
 
     // Create mock state manager

@@ -9,8 +9,8 @@
         "nl": "Autodata !{{is|is niet}} bijgewerkt in de afgelopen [[minutes]] minuten"
     },
     "hint": {
-        "en": "Checks whether the car sent new data (stream or API poll) within the given number of minutes.",
-        "nl": "Controleert of de auto nieuwe data heeft verstuurd (stream of API-poll) binnen het opgegeven aantal minuten."
+        "en": "Checks whether the car measured its newest data (received by stream or API poll) within the given number of minutes. Old data that is delivered late does not count as new.",
+        "nl": "Controleert of de auto zijn nieuwste data heeft gemeten (ontvangen via stream of API-poll) binnen het opgegeven aantal minuten. Oude data die laat wordt afgeleverd telt niet als nieuw."
     },
     "args": [
         {

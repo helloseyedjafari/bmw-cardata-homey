@@ -25,3 +25,8 @@ export function getStreamRetryDelayMs(failedAttempts: number): number {
   const index = Math.max(0, Math.floor(failedAttempts) - 1);
   return STREAM_RETRY_DELAYS_MS[index] ?? STREAM_RETRY_MAX_DELAY_MS;
 }
+
+/**
+ * How often the stream watchdog checks that the MQTT stream is still running (1 minute).
+ */
+export const STREAM_WATCHDOG_INTERVAL_MS = 60 * 1000;
