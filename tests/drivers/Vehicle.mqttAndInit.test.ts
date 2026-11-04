@@ -95,6 +95,7 @@ describe('Vehicle MQTT and Initialization', () => {
       onError: jest.fn(),
       onReconnect: jest.fn(),
       onMessage: jest.fn(),
+      onStateChange: jest.fn(),
     } as any;
 
     // Setup MqttStreamClient mock constructor
@@ -113,6 +114,8 @@ describe('Vehicle MQTT and Initialization', () => {
   });
 
   afterEach(() => {
+    // Failed stream starts schedule a retry timer - don't leave it behind
+    vehicle['cancelStreamRetry']();
     jest.clearAllMocks();
   });
 

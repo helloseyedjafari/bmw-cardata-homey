@@ -22,6 +22,17 @@ import {
 } from '../lib/types/DriveTrainType';
 import { UnitConverter } from '../utils/UnitConverter';
 import { Flows } from '../utils/Flows';
+import { STORE_KEY_LAST_DATA_UPDATE } from '../utils/StoreKeys';
+import {
+  isStreamState,
+  mapConnectionState,
+  STREAM_STATE_TITLES,
+  StreamState,
+  StreamStateContext,
+} from '../utils/StreamState';
+import { getStreamRetryDelayMs } from '../utils/StreamRetry';
+import { formatLastUpdate, isCarDataFresh as isTimestampFresh } from '../utils/CarDataFreshness';
+import type { ConnectionState } from '../lib/streaming/IMqttClient';
 
 export class Vehicle extends Device {
   currentVehicleState: VehicleStatus | null = null;
@@ -47,6 +58,24 @@ export class Vehicle extends Device {
 
   // MQTT streaming client for real-time updates
   private _mqttClient?: MqttStreamClient;
+
+  // Stream start retry state. These are intentionally declared without initializers and read
+  // with `?? default`, so they behave the same when a test builds a Vehicle without its constructor.
+  // Timer for the next scheduled stream start attempt (exponential backoff)
+  private _streamRetryTimer?: NodeJS.Timeout;
+  // Consecutive failed stream start attempts since the last successful start (undefined = 0)
+  private _streamRetryAttempt?: number;
+  // Bumped on every cancellation so an in-flight attempt knows it has been superseded (undefined = 0)
+  private _streamGeneration?: number;
+  // Generation of the stream start attempt that is currently running, if any
+  private _streamAttemptGeneration?: number;
+  // Streaming setting as last applied by this device. onSettings runs before Homey persists the new
+  // value, so getSettings() cannot be trusted there.
+  private _streamingEnabled?: boolean;
+  // Last stream state shown in the cardata_stream_state capability
+  private _streamState?: StreamState;
+  // Last text shown in the cardata_last_update capability
+  private _lastUpdateLabel?: string;
 
   // Device state manager for persistence (required - init fails if unavailable)
   // Public to allow ConnectedDriver to access for repair/pairing operations
@@ -190,11 +219,10 @@ export class Vehicle extends Device {
    * @public Used by onInit and ConnectedDriver repair flow
    */
   async initializeVehicleDataAndServices(): Promise<void> {
-    // Cleanup existing connections (safe to call even if nothing running)
-    if (this._mqttClient) {
-      await this._mqttClient.disconnect();
-      this._mqttClient = undefined;
-    }
+    // Cleanup existing connections (safe to call even if nothing running).
+    // Cancelling also drops a pending stream start retry so re-initialisation starts from scratch.
+    this.cancelStreamRetry();
+    await this.disposeMqttClient();
     this.stopApiPolling();
 
     // Initialize API client with credentials from store
@@ -203,6 +231,9 @@ export class Vehicle extends Device {
     // Verify API client was successfully initialized
     if (!this.api) {
       this.logger?.warn('API client not initialized - skipping vehicle data initialization');
+      const streamingEnabled = this.settings.streamingEnabled;
+      this._streamingEnabled = streamingEnabled;
+      await this.setStreamState(streamingEnabled ? StreamState.UNAVAILABLE : StreamState.DISABLED);
       return;
     }
 
@@ -220,68 +251,392 @@ export class Vehicle extends Device {
    *
    * Connects to BMW CarData MQTT broker and subscribes to vehicle-specific topic.
    * Updates capabilities immediately when messages arrive (no polling delay).
+   *
+   * Always supersedes a pending retry or in-flight attempt. When the stream cannot be started
+   * a retry with exponential backoff is scheduled (see {@link startMqttStream}), so the app only
+   * falls back to API polling temporarily.
+   *
+   * @param settingsOverride - Optional settings to use instead of reading from device (used during
+   *   onSettings, where Homey has not persisted the new values yet)
    */
-  private async initializeMqttStreaming(): Promise<void> {
+  private async initializeMqttStreaming(settingsOverride?: DeviceSettings): Promise<void> {
+    const settings = settingsOverride ?? this.settings;
+    this._streamingEnabled = settings.streamingEnabled;
+
+    // A (re)start replaces whatever was pending and restarts the backoff schedule
+    this.cancelStreamRetry();
+
+    // Check if streaming is enabled
+    if (!settings.streamingEnabled) {
+      this.logger?.info('MQTT streaming disabled in settings');
+      await this.setStreamState(StreamState.DISABLED);
+      return;
+    }
+
+    // Check if auth provider exists
+    if (!this._authProvider) {
+      this.logger?.warn('Auth provider not initialized - cannot start MQTT streaming');
+      await this.setStreamState(StreamState.UNAVAILABLE);
+      return;
+    }
+
+    await this.startMqttStream();
+  }
+
+  /**
+   * Make one attempt to start the MQTT stream: dispose the previous (half-created) client,
+   * create a fresh one, connect and subscribe to the vehicle topic.
+   *
+   * On failure a retry is scheduled with exponential backoff. Never runs two attempts at once,
+   * and an attempt that is cancelled while in flight (device deleted, streaming turned off,
+   * services re-initialised) cleans up after itself without scheduling anything.
+   */
+  private async startMqttStream(): Promise<void> {
+    const generation = this._streamGeneration ?? 0;
+
+    // Never run two attempts at once
+    if (this._streamAttemptGeneration === generation) {
+      this.logger?.debug(
+        `MQTT stream start already in progress for vehicle ${this.deviceData.id} - skipping`
+      );
+      return;
+    }
+    this._streamAttemptGeneration = generation;
+
+    let client: MqttStreamClient | undefined;
     try {
-      // Check if streaming is enabled
-      if (!this.settings.streamingEnabled) {
-        this.logger?.info('MQTT streaming disabled in settings');
+      // Dispose the previous client first: a failed start can leave a half-created one behind
+      await this.disposeMqttClient();
+      if (this.isStreamAttemptCancelled(generation)) {
         return;
       }
 
-      // Check if auth provider exists
-      if (!this._authProvider) {
+      const authProvider = this._authProvider;
+      if (!authProvider) {
         this.logger?.warn('Auth provider not initialized - cannot start MQTT streaming');
+        await this.setStreamState(StreamState.UNAVAILABLE);
         return;
       }
 
       this.logger?.info(`Initializing MQTT streaming for vehicle ${this.deviceData.id}`);
+      await this.setStreamState(mapConnectionState('connecting', this.getStreamStateContext()));
+      if (this.isStreamAttemptCancelled(generation)) {
+        return;
+      }
 
       // Create MQTT client
-      this._mqttClient = new MqttStreamClient(
-        this._authProvider,
+      client = new MqttStreamClient(
+        authProvider,
         {
           // Default MQTT options from constants
         },
         this.logger,
         this.deviceData.id // VIN
       );
-
-      // Set up event handlers
-      this._mqttClient.onConnect(() => {
-        this.logger?.info(`MQTT connected for vehicle ${this.deviceData.id}`);
-      });
-
-      this._mqttClient.onDisconnect(() => {
-        this.logger?.info(`MQTT disconnected for vehicle ${this.deviceData.id}`);
-      });
-
-      this._mqttClient.onError((error) => {
-        this.logger?.error(`MQTT error for vehicle ${this.deviceData.id}: ${error.message}`);
-      });
-
-      this._mqttClient.onReconnect(() => {
-        this.logger?.info(`MQTT reconnecting for vehicle ${this.deviceData.id}`);
-      });
-
-      this._mqttClient.onMessage((topic: string, message: StreamMessage) => {
-        void this.handleMqttMessage(topic, message);
-      });
+      this._mqttClient = client;
+      this.registerMqttHandlers(client);
 
       // Connect to MQTT broker
-      await this._mqttClient.connect();
+      await client.connect();
+      if (this.isStreamAttemptCancelled(generation)) {
+        await this.disconnectQuietly(client);
+        return;
+      }
 
       // Subscribe to vehicle topic (uses VIN from MqttStreamClient)
       const topic = `${this.deviceData.id}`; // Just the VIN, client adds gcid prefix
-      await this._mqttClient.subscribe(topic);
+      await client.subscribe(topic);
+      if (this.isStreamAttemptCancelled(generation)) {
+        await this.disconnectQuietly(client);
+        return;
+      }
 
+      // Started: the next failure begins the backoff schedule from the start again
+      this._streamRetryAttempt = 0;
       this.logger?.info(`MQTT streaming initialized for vehicle ${this.deviceData.id}`);
     } catch (error) {
+      if (this.isStreamAttemptCancelled(generation)) {
+        // Cancelled while in flight: the failure is expected, nobody wants a retry
+        this.logger?.debug(
+          `Cancelled MQTT stream start for vehicle ${this.deviceData.id} failed: ${String(error)}`
+        );
+        if (client) {
+          await this.disconnectQuietly(client);
+        }
+        return;
+      }
+
       this.logger?.error(
         `Failed to initialize MQTT streaming for vehicle ${this.deviceData.id} - will use API polling`,
         error instanceof Error ? error : undefined
       );
+      await this.scheduleStreamRetry();
+
+      // Do not leave the half-created client behind: mqtt.js keeps reconnecting in the background
+      if (client) {
+        await this.disconnectQuietly(client);
+        if (this._mqttClient === client) {
+          this._mqttClient = undefined;
+        }
+      }
+    } finally {
+      if (this._streamAttemptGeneration === generation) {
+        this._streamAttemptGeneration = undefined;
+      }
     }
+  }
+
+  /**
+   * Register the event handlers of a freshly created MQTT client.
+   *
+   * @param client - The MQTT client to wire up
+   */
+  private registerMqttHandlers(client: MqttStreamClient): void {
+    client.onConnect(() => {
+      this.logger?.info(`MQTT connected for vehicle ${this.deviceData.id}`);
+    });
+
+    client.onDisconnect(() => {
+      this.logger?.info(`MQTT disconnected for vehicle ${this.deviceData.id}`);
+    });
+
+    client.onError((error) => {
+      this.logger?.error(`MQTT error for vehicle ${this.deviceData.id}: ${error.message}`);
+    });
+
+    client.onReconnect(() => {
+      this.logger?.info(`MQTT reconnecting for vehicle ${this.deviceData.id}`);
+    });
+
+    client.onMessage((topic: string, message: StreamMessage) => {
+      void this.handleMqttMessage(topic, message);
+    });
+
+    client.onStateChange((state: ConnectionState) => {
+      this.handleMqttStateChange(client, state);
+    });
+  }
+
+  /**
+   * Translate a connection state change of the MQTT client into the stream state capability.
+   *
+   * Events of a client that has been replaced or disposed are ignored.
+   *
+   * @param client - The client that reported the change
+   * @param state - The new connection state
+   */
+  private handleMqttStateChange(client: MqttStreamClient, state: ConnectionState): void {
+    if (this._mqttClient !== client) {
+      return;
+    }
+
+    this.logger?.debug(`MQTT connection state for vehicle ${this.deviceData.id}: ${state}`);
+    void this.setStreamState(mapConnectionState(state, this.getStreamStateContext()));
+  }
+
+  /**
+   * Schedule the next stream start attempt using exponential backoff
+   * (30 s, 60 s, 120 s, 240 s, 480 s, then every 900 s) and show that the stream is recovering.
+   */
+  private async scheduleStreamRetry(): Promise<void> {
+    if (this._streamRetryTimer) {
+      clearTimeout(this._streamRetryTimer);
+    }
+
+    const failedAttempts = (this._streamRetryAttempt ?? 0) + 1;
+    this._streamRetryAttempt = failedAttempts;
+    const delayMs = getStreamRetryDelayMs(failedAttempts);
+
+    this.logger?.info(
+      `Retrying MQTT streaming for vehicle ${this.deviceData.id} in ${delayMs / 1000} seconds (failed attempts: ${failedAttempts})`
+    );
+    this._streamRetryTimer = setTimeout(() => {
+      this._streamRetryTimer = undefined;
+      void this.startMqttStream();
+    }, delayMs);
+
+    await this.setStreamState(StreamState.RECONNECTING);
+  }
+
+  /**
+   * Cancel any pending stream start retry and abandon an in-flight attempt.
+   *
+   * Used when the device is deleted or uninitialised, streaming is turned off and when services
+   * are re-initialised. Resets the backoff schedule.
+   */
+  private cancelStreamRetry(): void {
+    this._streamGeneration = (this._streamGeneration ?? 0) + 1;
+    if (this._streamRetryTimer) {
+      clearTimeout(this._streamRetryTimer);
+      this._streamRetryTimer = undefined;
+    }
+    this._streamRetryAttempt = 0;
+  }
+
+  /**
+   * Check whether a stream start attempt has been superseded since it began.
+   *
+   * @param generation - Generation captured when the attempt started
+   */
+  private isStreamAttemptCancelled(generation: number): boolean {
+    return (this._streamGeneration ?? 0) !== generation;
+  }
+
+  /**
+   * Disconnect and forget the current MQTT client, ignoring disconnect errors.
+   *
+   * The client is forgotten first so its own state change events are ignored.
+   */
+  private async disposeMqttClient(): Promise<void> {
+    const client = this._mqttClient;
+    this._mqttClient = undefined;
+    if (client) {
+      await this.disconnectQuietly(client);
+    }
+  }
+
+  /**
+   * Disconnect an MQTT client and ignore any error.
+   *
+   * @param client - The client to disconnect
+   */
+  private async disconnectQuietly(client: MqttStreamClient): Promise<void> {
+    try {
+      await client.disconnect();
+    } catch (error) {
+      this.logger?.debug(
+        `Ignoring MQTT disconnect error for vehicle ${this.deviceData.id}: ${String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Stop MQTT streaming because the user turned it off: cancel retries, show the stream as
+   * disabled and disconnect the client.
+   */
+  private async stopMqttStreaming(): Promise<void> {
+    this._streamingEnabled = false;
+    this.cancelStreamRetry();
+    await this.setStreamState(StreamState.DISABLED);
+    await this.disposeMqttClient();
+  }
+
+  /**
+   * Context for translating MQTT client states into stream states.
+   */
+  private getStreamStateContext(): StreamStateContext {
+    return {
+      streamingEnabled: this._streamingEnabled ?? this.settings.streamingEnabled,
+      recovering: this._streamRetryTimer !== undefined || (this._streamRetryAttempt ?? 0) > 0,
+    };
+  }
+
+  /**
+   * Show the state of the MQTT stream in the `cardata_stream_state` capability and fire the
+   * "Car data stream changed" trigger when the value changes.
+   *
+   * Duplicates are ignored. The very first value (no previous value known) is not a change and
+   * does not fire the trigger. Never throws.
+   *
+   * @param next - The new stream state
+   */
+  private async setStreamState(next: StreamState): Promise<void> {
+    const previous = this._streamState ?? this.readStreamStateCapability();
+    this._streamState = next;
+    if (previous === next) {
+      return;
+    }
+
+    try {
+      await this.setCapabilityValueSafe(Capabilities.CARDATA_STREAM_STATE, next);
+    } catch (error) {
+      if (this._streamState === next) {
+        this._streamState = previous;
+      }
+      this.logger?.warn(
+        `Failed to set stream state '${next}' for vehicle ${this.deviceData.id}: ${String(error)}`
+      );
+      return;
+    }
+
+    if (previous !== undefined) {
+      await this.triggerStreamStateChanged(next);
+    }
+  }
+
+  /**
+   * Read the stream state currently stored in the capability (e.g. from before an app restart).
+   */
+  private readStreamStateCapability(): StreamState | undefined {
+    if (!this.hasCapability(Capabilities.CARDATA_STREAM_STATE)) {
+      return undefined;
+    }
+    const value: unknown = this.getCapabilityValue(Capabilities.CARDATA_STREAM_STATE);
+    return isStreamState(value) ? value : undefined;
+  }
+
+  /**
+   * Fire the "Car data stream changed" flow trigger.
+   *
+   * @param state - The new stream state
+   */
+  private async triggerStreamStateChanged(state: StreamState): Promise<void> {
+    try {
+      const card = this.homey.flow.getDeviceTriggerCard(Flows.STREAM_STATE_CHANGED);
+      await card.trigger(this, { state: STREAM_STATE_TITLES[state] }, {});
+    } catch (error) {
+      this.logger?.error(
+        `Failed to fire stream state changed trigger for vehicle ${this.deviceData.id}`,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Remember that real car data just arrived (MQTT message or successful REST poll).
+   *
+   * Persists the raw timestamp in the device store (survives restarts, used by the
+   * `car_data_fresh` condition) and shows it in the `cardata_last_update` capability in the
+   * Homey's timezone. Never throws: bookkeeping must not break data handling.
+   */
+  private async recordCarDataUpdate(): Promise<void> {
+    try {
+      const now = Date.now();
+      await this.setStoreValue(STORE_KEY_LAST_DATA_UPDATE, now);
+
+      const label = formatLastUpdate(now, this.getHomeyTimeZone());
+      if (label !== this._lastUpdateLabel) {
+        await this.setCapabilityValueSafe(Capabilities.CARDATA_LAST_UPDATE, label);
+        this._lastUpdateLabel = label;
+      }
+    } catch (error) {
+      this.logger?.warn(
+        `Failed to record last car data update for vehicle ${this.deviceData.id}: ${String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Get the Homey's timezone, or undefined (system default) when it cannot be determined.
+   */
+  private getHomeyTimeZone(): string | undefined {
+    try {
+      return this.homey.clock.getTimezone();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Check whether car data was updated within the given number of minutes.
+   *
+   * Used by the `car_data_fresh` flow condition. A device that never received data is not fresh.
+   *
+   * @param minutes - Maximum age of the last update, in minutes
+   * @returns True when real car data arrived within the last `minutes` minutes
+   */
+  isCarDataFresh(minutes: number): boolean {
+    return isTimestampFresh(this.getStoreValue(STORE_KEY_LAST_DATA_UPDATE), minutes);
   }
 
   /**
@@ -298,6 +653,9 @@ export class Vehicle extends Device {
     try {
       // Update state from MQTT message (ALWAYS happens regardless of trip detection)
       this.stateManager.updateFromMqttMessage(message);
+
+      // Real car data just arrived
+      await this.recordCarDataUpdate();
 
       // Check if message contains TRIP category telematic data and update debounce
       await this.checkAndDebounceTripCompletion(message);
@@ -364,6 +722,9 @@ export class Vehicle extends Device {
 
       // Update state manager cache with API data
       await this.stateManager.updateFromApi(rawData);
+
+      // Real car data just arrived
+      await this.recordCarDataUpdate();
 
       this.logger?.debug(
         `API poll completed for vehicle ${this.deviceData.id} (${Object.keys(rawData).length} telematic keys)`
@@ -634,6 +995,10 @@ export class Vehicle extends Device {
       }
     }
 
+    // Car data health capabilities are available for all vehicles, before the drive train is known
+    await this.addCapabilitySafe(Capabilities.CARDATA_STREAM_STATE);
+    await this.addCapabilitySafe(Capabilities.CARDATA_LAST_UPDATE);
+
     // Get drive train type from persisted store (set during initialization)
     const driveTrain = this.stateManager.getDriveTrain();
     if (driveTrain == DriveTrainType.UNKNOWN) {
@@ -774,14 +1139,11 @@ export class Vehicle extends Device {
     // Handle streaming enabled/disabled changes
     if (changedKeys.includes(nameOf<DeviceSettings>('streamingEnabled'))) {
       this.logger?.info(`MQTT streaming ${settings.streamingEnabled ? 'enabled' : 'disabled'}`);
-      // Start or stop MQTT streaming
+      // Start or stop MQTT streaming. The new value is passed explicitly: Homey has not persisted it yet.
       if (settings.streamingEnabled) {
-        await this.initializeMqttStreaming();
+        await this.initializeMqttStreaming(settings);
       } else {
-        if (this._mqttClient) {
-          await this._mqttClient.disconnect();
-          this._mqttClient = undefined;
-        }
+        await this.stopMqttStreaming();
       }
     }
 
@@ -827,17 +1189,25 @@ export class Vehicle extends Device {
   onDeleted() {
     this.logger?.info('Vehicle has been deleted');
 
-    // Stop MQTT streaming
-    if (this._mqttClient) {
-      this._mqttClient
-        .disconnect()
-        .then(() => {
-          this.logger?.info('MQTT client disconnected successfully');
-        })
-        .catch((error) => {
-          this.logger?.error(`Error disconnecting MQTT client: ${String(error)}`);
-        });
-    }
+    void this.stopBackgroundServices();
+  }
+
+  /**
+   * onUninit is called when the device is destroyed (also after it was deleted) or the app stops.
+   */
+  async onUninit() {
+    await this.stopBackgroundServices();
+  }
+
+  /**
+   * Stop everything that keeps running in the background for this device: stream start retries,
+   * the MQTT stream, API polling and the trip debounce timer.
+   *
+   * Idempotent, so it is safe to call from both onDeleted and onUninit.
+   */
+  private async stopBackgroundServices(): Promise<void> {
+    // Cancel pending stream start retries (and abandon an in-flight attempt)
+    this.cancelStreamRetry();
 
     // Stop API polling
     this.stopApiPolling();
@@ -846,6 +1216,18 @@ export class Vehicle extends Device {
     if (this._tripDebounceTimer) {
       clearTimeout(this._tripDebounceTimer);
       this._tripDebounceTimer = undefined;
+    }
+
+    // Stop MQTT streaming
+    const client = this._mqttClient;
+    this._mqttClient = undefined;
+    if (client) {
+      try {
+        await client.disconnect();
+        this.logger?.info('MQTT client disconnected successfully');
+      } catch (error) {
+        this.logger?.error(`Error disconnecting MQTT client: ${String(error)}`);
+      }
     }
   }
 
