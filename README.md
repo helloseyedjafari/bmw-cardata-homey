@@ -158,6 +158,17 @@ To configure streaming in the BMW portal:
 
 **Status:** Automatically enabled if streaming subscription is active.
 
+### Stream health
+
+The stream recovers by itself: if it can't start, or a login renewal or the network fails, it retries after 30 s, 1, 2, 4 and 8 minutes, then every 15 minutes until it's back. It also renews its BMW login shortly before the hourly token expires instead of waiting to be rejected.
+
+Each car shows two extra values in Homey:
+
+- **Car data stream**: Live, Connecting, Reconnecting, Off (turned off in the device settings) or Unavailable (the app can't start the stream at all, for example after a failed login).
+- **Last car data**: when the car last sent data, by stream or by API poll.
+
+For Flows there's a **Car data stream changed** trigger (with the new state as a tag) and a **Car data was updated in the last … minutes** condition. Use the condition to avoid acting on stale data, for example before working out how much to charge from the battery level.
+
 ### REST API Polling (Fallback)
 
 **How it works:**

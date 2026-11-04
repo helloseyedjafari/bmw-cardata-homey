@@ -1,4 +1,11 @@
 /**
+ * Minimum time between writes of the last-update timestamp to the device store (milliseconds).
+ * Streamed messages can arrive several times a second while driving; the exact time is kept in
+ * memory and only persisted this often, which is plenty for minute-level freshness checks.
+ */
+export const LAST_DATA_UPDATE_PERSIST_INTERVAL_MS = 60 * 1000;
+
+/**
  * Format the time of the last car data update for display, in the Homey's timezone.
  *
  * Example output: `4 Nov, 14:32`. Falls back to an ISO string when `Intl` does not support

@@ -533,6 +533,31 @@
             "filter": "driver_id=bmw|mini"
           }
         ]
+      },
+      {
+        "id": "stream_state_changed",
+        "title": {
+          "en": "Car data stream changed",
+          "nl": "Autodata-stream gewijzigd"
+        },
+        "tokens": [
+          {
+            "name": "state",
+            "type": "string",
+            "title": {
+              "en": "State",
+              "nl": "Status"
+            },
+            "example": "Reconnecting"
+          }
+        ],
+        "args": [
+          {
+            "name": "device",
+            "type": "device",
+            "filter": "driver_id=bmw|mini"
+          }
+        ]
       }
     ],
     "conditions": [
@@ -563,6 +588,43 @@
             },
             "min": 0,
             "max": 100
+          },
+          {
+            "name": "device",
+            "type": "device",
+            "filter": "driver_id=bmw|mini"
+          }
+        ]
+      },
+      {
+        "id": "car_data_fresh",
+        "title": {
+          "en": "Car data !{{was|wasn't}} updated recently",
+          "nl": "Autodata !{{is|is niet}} onlangs bijgewerkt"
+        },
+        "titleFormatted": {
+          "en": "Car data !{{was|wasn't}} updated in the last [[minutes]] minutes",
+          "nl": "Autodata !{{is|is niet}} bijgewerkt in de afgelopen [[minutes]] minuten"
+        },
+        "hint": {
+          "en": "Checks whether the car sent new data (stream or API poll) within the given number of minutes.",
+          "nl": "Controleert of de auto nieuwe data heeft verstuurd (stream of API-poll) binnen het opgegeven aantal minuten."
+        },
+        "args": [
+          {
+            "type": "number",
+            "name": "minutes",
+            "title": {
+              "en": "Minutes",
+              "nl": "Minuten"
+            },
+            "placeholder": {
+              "en": "30",
+              "nl": "30"
+            },
+            "min": 1,
+            "max": 1440,
+            "step": 1
           },
           {
             "name": "device",
@@ -1039,6 +1101,63 @@
     }
   ],
   "capabilities": {
+    "cardata_last_update": {
+      "type": "string",
+      "title": {
+        "en": "Last car data",
+        "nl": "Laatste autodata"
+      },
+      "getable": true,
+      "setable": false,
+      "uiComponent": "sensor"
+    },
+    "cardata_stream_state": {
+      "type": "enum",
+      "title": {
+        "en": "Car data stream",
+        "nl": "Autodata-stream"
+      },
+      "values": [
+        {
+          "id": "connected",
+          "title": {
+            "en": "Live",
+            "nl": "Live"
+          }
+        },
+        {
+          "id": "connecting",
+          "title": {
+            "en": "Connecting",
+            "nl": "Verbinden"
+          }
+        },
+        {
+          "id": "reconnecting",
+          "title": {
+            "en": "Reconnecting",
+            "nl": "Opnieuw verbinden"
+          }
+        },
+        {
+          "id": "disabled",
+          "title": {
+            "en": "Off",
+            "nl": "Uit"
+          }
+        },
+        {
+          "id": "unavailable",
+          "title": {
+            "en": "Unavailable",
+            "nl": "Niet beschikbaar"
+          }
+        }
+      ],
+      "getable": true,
+      "setable": false,
+      "uiComponent": "sensor"
+    },
     "charging_status_capability": {
       "type": "enum",
       "title": {

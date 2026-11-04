@@ -117,6 +117,6 @@
     "en": "Bug fixes"
   },
   "1.1.0": {
-    "en": "First release of CarData for BMW & MINI, based on BMW / Mini Connected 1.0.14."
+    "en": "First release of CarData for BMW & MINI, based on BMW / Mini Connected 1.0.14. The live data stream now reconnects by itself after a failed start, a failed login renewal or a network drop, and renews its login before it expires instead of silently falling back to hourly polling. New: 'Car data stream' and 'Last car data' on the device, a 'Car data stream changed' trigger and a 'Car data was updated in the last … minutes' condition. Changing the polling settings now takes effect straight away."
   }
 }

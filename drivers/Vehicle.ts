@@ -31,7 +31,11 @@ import {
   StreamStateContext,
 } from '../utils/StreamState';
 import { getStreamRetryDelayMs } from '../utils/StreamRetry';
-import { formatLastUpdate, isCarDataFresh as isTimestampFresh } from '../utils/CarDataFreshness';
+import {
+  formatLastUpdate,
+  isCarDataFresh as isTimestampFresh,
+  LAST_DATA_UPDATE_PERSIST_INTERVAL_MS,
+} from '../utils/CarDataFreshness';
 import type { ConnectionState } from '../lib/streaming/IMqttClient';
 
 export class Vehicle extends Device {
@@ -76,6 +80,10 @@ export class Vehicle extends Device {
   private _streamState?: StreamState;
   // Last text shown in the cardata_last_update capability
   private _lastUpdateLabel?: string;
+  // Time real car data last arrived (epoch ms), kept in memory between throttled store writes
+  private _lastDataUpdateMs?: number;
+  // Time last written to the device store (epoch ms)
+  private _lastDataUpdatePersistedMs?: number;
 
   // Device state manager for persistence (required - init fails if unavailable)
   // Public to allow ConnectedDriver to access for repair/pairing operations
@@ -595,14 +603,21 @@ export class Vehicle extends Device {
   /**
    * Remember that real car data just arrived (MQTT message or successful REST poll).
    *
-   * Persists the raw timestamp in the device store (survives restarts, used by the
-   * `car_data_fresh` condition) and shows it in the `cardata_last_update` capability in the
+   * Keeps the exact time in memory and persists it in the device store at most once a minute
+   * (survives restarts, used by the `car_data_fresh` condition), and shows it in the `cardata_last_update` capability in the
    * Homey's timezone. Never throws: bookkeeping must not break data handling.
    */
   private async recordCarDataUpdate(): Promise<void> {
     try {
       const now = Date.now();
-      await this.setStoreValue(STORE_KEY_LAST_DATA_UPDATE, now);
+      this._lastDataUpdateMs = now;
+
+      // Persist at most once a minute: messages can arrive several times a second while driving
+      const persistedAt = this._lastDataUpdatePersistedMs;
+      if (persistedAt === undefined || now - persistedAt >= LAST_DATA_UPDATE_PERSIST_INTERVAL_MS) {
+        await this.setStoreValue(STORE_KEY_LAST_DATA_UPDATE, now);
+        this._lastDataUpdatePersistedMs = now;
+      }
 
       const label = formatLastUpdate(now, this.getHomeyTimeZone());
       if (label !== this._lastUpdateLabel) {
@@ -636,7 +651,10 @@ export class Vehicle extends Device {
    * @returns True when real car data arrived within the last `minutes` minutes
    */
   isCarDataFresh(minutes: number): boolean {
-    return isTimestampFresh(this.getStoreValue(STORE_KEY_LAST_DATA_UPDATE), minutes);
+    // The in-memory time is the most recent; the store covers the time before an app restart
+    const lastUpdate: unknown =
+      this._lastDataUpdateMs ?? this.getStoreValue(STORE_KEY_LAST_DATA_UPDATE);
+    return isTimestampFresh(lastUpdate, minutes);
   }
 
   /**
@@ -745,8 +763,8 @@ export class Vehicle extends Device {
    * Rate limit: BMW CarData API has 50 requests/24h per vehicle limit.
    * Recommended minimum interval: 30 minutes (48 requests/day).
    */
-  private startApiPolling(): void {
-    const settings = this.settings;
+  private startApiPolling(settingsOverride?: DeviceSettings): void {
+    const settings = settingsOverride ?? this.settings;
 
     // Stop existing timer if running
     this.stopApiPolling();
@@ -1128,9 +1146,10 @@ export class Vehicle extends Device {
         this.logger?.info(`API polling ${settings.apiPollingEnabled ? 'enabled' : 'disabled'}`);
       }
 
-      // Start or stop API polling based on current enabled state
+      // Start or stop API polling based on current enabled state.
+      // The new values are passed explicitly: Homey has not persisted them yet.
       if (settings.apiPollingEnabled) {
-        this.startApiPolling();
+        this.startApiPolling(settings);
       } else {
         this.stopApiPolling();
       }

@@ -804,7 +804,34 @@ describe('Vehicle stream health', () => {
       await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
 
       expect((vehicle.setCapabilityValue as jest.Mock).mock.calls).toHaveLength(writesAfterFirst);
-      // The raw timestamp is still refreshed
+    });
+
+    it('should_persistTimestampAtMostOncePerMinute_when_messagesArriveQuickly', async () => {
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
+      jest.setSystemTime(new Date(NOW.getTime() + 5_000));
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
+      jest.setSystemTime(new Date(NOW.getTime() + 59_000));
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
+
+      const storeWrites = (vehicle.setStoreValue as jest.Mock).mock.calls.filter(
+        ([key]) => key === STORE_KEY_LAST_DATA_UPDATE
+      );
+      expect(storeWrites).toHaveLength(1);
+      expect(store.get(STORE_KEY_LAST_DATA_UPDATE)).toBe(NOW.getTime());
+
+      jest.setSystemTime(new Date(NOW.getTime() + 60_000));
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
+
+      expect(store.get(STORE_KEY_LAST_DATA_UPDATE)).toBe(NOW.getTime() + 60_000);
+    });
+
+    it('should_retryPersisting_when_previousStoreWriteFailed', async () => {
+      (vehicle.setStoreValue as jest.Mock).mockRejectedValueOnce(new Error('disk busy'));
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
+
+      jest.setSystemTime(new Date(NOW.getTime() + 5_000));
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
+
       expect(store.get(STORE_KEY_LAST_DATA_UPDATE)).toBe(NOW.getTime() + 5_000);
     });
 
@@ -918,6 +945,18 @@ describe('Vehicle stream health', () => {
 
       expect(vehicle.isCarDataFresh(5)).toBe(false);
       expect(vehicle.isCarDataFresh(10)).toBe(true);
+    });
+
+    it('should_useLatestDataTime_when_storeWriteWasThrottled', async () => {
+      const message = { timestamp: '2026-11-04T13:30:00Z', data: {} } as unknown as StreamMessage;
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message);
+      jest.setSystemTime(new Date(NOW.getTime() + 50_000));
+      await vehicle['handleMqttMessage']('gcid/TEST_VIN_123', message); // not persisted yet
+
+      // 1 min 30 s after the second message, 2 min 20 s after the persisted one
+      jest.setSystemTime(new Date(NOW.getTime() + 140_000));
+
+      expect(vehicle.isCarDataFresh(2)).toBe(true);
     });
   });
 
