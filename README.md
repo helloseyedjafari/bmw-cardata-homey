@@ -102,6 +102,18 @@ This app displays the following data in Homey:
 
 - None (read-only API)
 
+### Dashboard widget
+
+**Car battery** shows a car's battery level on a Homey dashboard. When you add it, pick the car,
+a style (Battery, Circle or Large number) and a light or dark background. Besides the level it shows:
+
+- the charging state: Charging, Plugged in, Low battery (under 20%) or Parked
+- when charging will finish, or otherwise how long ago the car last sent data
+- the remaining range, in the distance unit of the car's device settings
+
+The colour follows the level: blue from 50%, amber from 20% and red below that. The widget updates
+within seconds of new car data and whenever the dashboard is opened.
+
 ## Data Delivery: MQTT Streaming vs API Polling
 
 The BMW CarData API provides two methods for retrieving vehicle data:
