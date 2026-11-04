@@ -260,7 +260,7 @@ export class LokiLogger extends SimpleClass implements ILogger {
    * Store a structured log entry
    */
   private persistLog(level: string, message: string): void {
-    if (this.logs.length >= 100) {
+    if (this.logs.length >= 1000) {
       this.logs.shift();
     }
     this.logs.push({

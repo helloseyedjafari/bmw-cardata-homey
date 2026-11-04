@@ -72,7 +72,7 @@ export class Logger implements ILogger {
     if (level === LogLevel.ERROR) this.logger.error(message);
     else this.logger.log(`${LogLevel[level]}: ${message}`);
     if (logLevel || level >= LogLevel.ERROR) {
-      if (this.logs.length >= 100) {
+      if (this.logs.length >= 1000) {
         this.logs.shift();
       }
       this.logs.push({

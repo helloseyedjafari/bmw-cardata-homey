@@ -40,3 +40,8 @@ export const STORE_KEY_CONTAINER_ID = 'containerId';
  * in epoch milliseconds. Cached state restored at startup does not count.
  */
 export const STORE_KEY_LAST_DATA_UPDATE = 'lastCarDataUpdate';
+
+/**
+ * Persistent event log: Flow triggers fired and car data received (see utils/EventLog.ts)
+ */
+export const STORE_KEY_EVENT_LOG = 'eventLog';

@@ -22,6 +22,7 @@ import type { StreamMessage } from '../lib/streaming/StreamMessage';
 import { ApiError, RateLimitError } from '../lib/types/errors';
 import type { ContainerManager } from '../lib/api/ContainerManager';
 import { DeviceStateManager } from '../utils/DeviceStateManager';
+import { EventLog, EventLogEntry, pickLoggedValues } from '../utils/EventLog';
 import {
   HV_BATTERY_DRIVE_TRAINS,
   COMBUSTION_ENGINE_DRIVE_TRAINS,
@@ -110,6 +111,10 @@ export class Vehicle extends Device {
   // from the cache at startup) until then.
   private _flowStates?: FlowStates;
 
+  // Persistent log of triggers fired and car data received, readable through the app's
+  // getEventLog API without any Flow (see utils/EventLog.ts)
+  private eventLog?: EventLog;
+
   // Device state manager for persistence (required - init fails if unavailable)
   // Public to allow ConnectedDriver to access for repair/pairing operations
   public stateManager!: DeviceStateManager;
@@ -136,6 +141,7 @@ export class Vehicle extends Device {
    * onInit is called when the device is initialized.
    */
   async onInit() {
+    this.eventLog = new EventLog(this);
     this.logger?.info(`Initializing BMW vehicle device: ${this.getName()} (${this.deviceData.id})`);
 
     this.stateManager = new DeviceStateManager(
@@ -484,6 +490,7 @@ export class Vehicle extends Device {
     const failedAttempts = (this._streamRetryAttempt ?? 0) + 1;
     this._streamRetryAttempt = failedAttempts;
     const delayMs = getStreamRetryDelayMs(failedAttempts);
+    this.eventLog?.record('stream', { event: 'start failed, retrying', inSeconds: delayMs / 1000 });
 
     this.logger?.info(
       `Retrying MQTT streaming for vehicle ${this.deviceData.id} in ${delayMs / 1000} seconds (failed attempts: ${failedAttempts})`
@@ -561,6 +568,7 @@ export class Vehicle extends Device {
       }
 
       this.logger?.warn('MQTT stream found stopped with no retry pending - restarting');
+      this.eventLog?.record('stream', { event: 'found stopped, restarting' });
       void this.startMqttStream().catch((error: unknown) => {
         this.logStreamWatchdogError(error);
       });
@@ -707,7 +715,7 @@ export class Vehicle extends Device {
    */
   private async triggerStreamStateChanged(state: StreamState): Promise<void> {
     try {
-      const card = this.homey.flow.getDeviceTriggerCard(Flows.STREAM_STATE_CHANGED);
+      const card = this.getTriggerCard(Flows.STREAM_STATE_CHANGED);
       await card.trigger(this, { state: STREAM_STATE_TITLES[state] }, {});
     } catch (error) {
       this.logger?.error(
@@ -876,6 +884,11 @@ export class Vehicle extends Device {
       // Update state from MQTT message (ALWAYS happens regardless of trip detection)
       this.stateManager.updateFromMqttMessage(message);
 
+      const streamed = pickLoggedValues(message.data);
+      if (Object.keys(streamed).length > 0) {
+        this.eventLog?.record('data', { source: 'stream', values: streamed });
+      }
+
       // Real car data just arrived: remember when the car measured it
       await this.recordCarDataUpdate(resolveCarDataTimeMs(message.data, message.timestamp));
 
@@ -1038,6 +1051,11 @@ export class Vehicle extends Device {
       // Update state manager cache with API data
       await this.stateManager.updateFromApi(rawData);
 
+      const polled = pickLoggedValues(rawData);
+      if (Object.keys(polled).length > 0) {
+        this.eventLog?.record('data', { source: 'poll', values: polled });
+      }
+
       // Real car data just arrived: remember when the car measured it
       await this.recordCarDataUpdate(resolveCarDataTimeMs(rawData));
 
@@ -1155,10 +1173,34 @@ export class Vehicle extends Device {
    *
    * @param planned - The triggers to fire
    */
+  /**
+   * Get a device trigger card whose `trigger` first records the event in the event log.
+   *
+   * @param cardId - The Flow card ID
+   */
+  private getTriggerCard(cardId: string): {
+    trigger: (device: Device, tokens?: object, state?: object) => Promise<unknown>;
+  } {
+    const card = this.homey.flow.getDeviceTriggerCard(cardId);
+    return {
+      trigger: (device: Device, tokens: object = {}, state: object = {}) => {
+        this.eventLog?.record('trigger', { card: cardId, tokens });
+        return card.trigger(device, tokens, state);
+      },
+    };
+  }
+
+  /**
+   * Everything in the event log, oldest first. Used by the app's getEventLog API.
+   */
+  getEventLog(): EventLogEntry[] {
+    return this.eventLog?.getEntries() ?? [];
+  }
+
   private async fireStateTriggers(planned: PlannedTrigger[]): Promise<void> {
     for (const { cardId, tokens, state } of planned) {
       try {
-        const card = this.homey.flow.getDeviceTriggerCard(cardId);
+        const card = this.getTriggerCard(cardId);
         await card.trigger(this, tokens, state ?? {});
       } catch (error) {
         this.logger?.error(
@@ -1306,7 +1348,7 @@ export class Vehicle extends Device {
           oldFuelValue !== undefined &&
           newFuelValue - oldFuelValue >= this.settings.refuellingTriggerThreshold
         ) {
-          const refuelledFlowCard = this.homey.flow.getDeviceTriggerCard(Flows.REFUELLED);
+          const refuelledFlowCard = this.getTriggerCard(Flows.REFUELLED);
           const location = this.stateManager.getLastLocation();
           if (location && !location.address) {
             await this.resolveAddress(location);
@@ -1601,6 +1643,9 @@ export class Vehicle extends Device {
         this.logger?.error(`Error disconnecting MQTT client: ${String(error)}`);
       }
     }
+
+    // Keep what was logged since the last save (last, so the cleanup above happens right away)
+    await this.eventLog?.flush();
   }
 
   // Note: Remote service capability listeners removed during BMW CarData API migration
@@ -1701,9 +1746,7 @@ export class Vehicle extends Device {
       const startMileage = this.stateManager.getLastTripCompleteMileage() ?? 0;
 
       // Trigger flow card
-      const driveSessionStartedFlowCard = this.homey.flow.getDeviceTriggerCard(
-        Flows.DRIVE_SESSION_STARTED
-      );
+      const driveSessionStartedFlowCard = this.getTriggerCard(Flows.DRIVE_SESSION_STARTED);
 
       await driveSessionStartedFlowCard.trigger(
         this,
@@ -1765,9 +1808,7 @@ export class Vehicle extends Device {
       const endMileage = currentState.currentMileage ?? startMileage;
 
       // Trigger flow card
-      const driveSessionCompletedFlowCard = this.homey.flow.getDeviceTriggerCard(
-        Flows.DRIVE_SESSION_COMPLETED
-      );
+      const driveSessionCompletedFlowCard = this.getTriggerCard(Flows.DRIVE_SESSION_COMPLETED);
 
       await driveSessionCompletedFlowCard.trigger(
         this,
@@ -1893,7 +1934,7 @@ export class Vehicle extends Device {
     }
 
     // Always trigger location changed flow
-    const locationChangedFlowCard = this.homey.flow.getDeviceTriggerCard(Flows.LOCATION_CHANGED);
+    const locationChangedFlowCard = this.getTriggerCard(Flows.LOCATION_CHANGED);
     await locationChangedFlowCard.trigger(
       this,
       {
@@ -1913,7 +1954,7 @@ export class Vehicle extends Device {
 
       if (newLocation.label) {
         this.logger?.info('Entered geofence.');
-        const geoFenceEnter = this.homey.flow.getDeviceTriggerCard(Flows.GEO_FENCE_ENTER);
+        const geoFenceEnter = this.getTriggerCard(Flows.GEO_FENCE_ENTER);
         await geoFenceEnter.trigger(
           this,
           {
@@ -1928,7 +1969,7 @@ export class Vehicle extends Device {
 
       if (oldLocation.label) {
         this.logger?.info('Exit geofence.');
-        const geoFenceExit = this.homey.flow.getDeviceTriggerCard(Flows.GEO_FENCE_EXIT);
+        const geoFenceExit = this.getTriggerCard(Flows.GEO_FENCE_EXIT);
         await geoFenceExit.trigger(
           this,
           {

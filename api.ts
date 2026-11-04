@@ -134,6 +134,32 @@ class DeviceDetails {
   }
 }
 
+/**
+ * Event log of every vehicle: Flow triggers fired and car data received, oldest first.
+ * For debugging without building a Flow.
+ */
+export async function getEventLog({
+  homey,
+}: {
+  homey: Homey;
+}): Promise<Array<{ id: string; name: string; entries: unknown[] }>> {
+  await Promise.resolve(); // Ensure async context
+
+  const result: Array<{ id: string; name: string; entries: unknown[] }> = [];
+  const drivers = homey.drivers.getDrivers() as { [key: string]: Driver };
+  for (const key in drivers) {
+    for (const device of drivers[key].getDevices()) {
+      const data = device.getData() as DeviceData;
+      result.push({
+        id: data.id,
+        name: device.getName(),
+        entries: (device as Vehicle).getEventLog(),
+      });
+    }
+  }
+  return result;
+}
+
 export async function getRegisteredDevices({ homey }: { homey: Homey }): Promise<DeviceDetails[]> {
   await Promise.resolve(); // Ensure async context
 

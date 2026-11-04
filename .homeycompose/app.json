@@ -89,6 +89,10 @@
     "getClientTokens": {
       "method": "GET",
       "path": "/getClientTokens"
+    },
+    "getEventLog": {
+      "method": "GET",
+      "path": "/getEventLog"
     }
   },
   "source": "https://github.com/helloseyedjafari/bmw-cardata-homey",
