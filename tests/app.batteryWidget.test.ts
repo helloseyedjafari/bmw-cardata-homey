@@ -16,7 +16,7 @@ jest.mock('homey', () => ({
 import * as fs from 'fs';
 import * as path from 'path';
 import type { BMWConnectedDrive } from '../app';
-import batteryWidgetApi from '../widgets/battery/api';
+import * as batteryWidgetApi from '../widgets/battery/api';
 
 // app.ts ends with `module.exports = BMWConnectedDrive`, so the class is the module itself
 const AppClass = jest.requireActual<typeof BMWConnectedDrive>('../app');
@@ -209,6 +209,17 @@ describe('BMWConnectedDrive battery widget', () => {
     it('should_exposeTheStateEndpointThatTheWidgetApiImplements', () => {
       expect(widget.api).toEqual({ getState: { method: 'GET', path: '/state' } });
       expect(typeof batteryWidgetApi.getState).toBe('function');
+    });
+
+    it('should_exportEveryRouteByName_when_loadedTheWayHomeyLoadsIt', () => {
+      // Homey requires the compiled CommonJS file and calls module.exports[routeName]. A default
+      // export ends up under module.exports.default, where Homey does not look.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const loaded = require('../widgets/battery/api') as Record<string, unknown>;
+
+      for (const route of Object.keys(widget.api)) {
+        expect(typeof loaded[route]).toBe('function');
+      }
     });
 
     it('should_haveTheCarSettingTheAutocompleteListenerIsRegisteredFor', () => {
